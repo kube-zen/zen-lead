@@ -7,7 +7,9 @@
 
 > **"Don't code High Availability. Configure it."**
 
-Zen-Lead standardizes High Availability (HA) across Kubernetes controllers and workloads. Instead of copy-pasting leader election code, just add an annotation to your Deployment.
+Zen-Lead is an **open-source Kubernetes controller** that provides leader election for components that don't support it natively. Perfect for CronJobs, DaemonSets, legacy applications, and third-party containers.
+
+**Key Differentiator:** Works with **any** Kubernetes workload via simple annotations - no code changes required!
 
 ## 🚀 Quick Start
 
@@ -54,15 +56,55 @@ spec:
 
 ## ✨ Features
 
-- ✅ **Zero Code Changes** - Just add annotations
+- ✅ **Open Source** - Fully open-source Kubernetes controller
+- ✅ **Works with ANY Component** - CronJobs, DaemonSets, legacy apps, third-party containers
+- ✅ **Zero Code Changes** - Just add annotations - works with unmodifiable components
+- ✅ **Language Agnostic** - Works with Python, Node.js, Java, Go, Bash, etc.
 - ✅ **Automatic Failover** - Leader crashes? New leader elected in seconds
 - ✅ **Standard Kubernetes** - Uses `coordination.k8s.io/Lease` API
-- ✅ **Works with Any Workload** - Deployments, StatefulSets, CronJobs
 - ✅ **Status API** - Query who's the leader via CRD status
 
 ## 📖 Use Cases
 
-### Use Case 1: Controller HA
+### Use Case 1: CronJobs Without Leader Election ⭐ **Primary Use Case**
+
+**Problem:** CronJob runs on 3 nodes, sends 3 duplicate emails. CronJobs don't have built-in leader election.
+
+**Solution:**
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: daily-report
+spec:
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            zen-lead/pool: report-generator
+            zen-lead/join: "true"
+```
+
+**Result:** Only 1 cluster instance executes, even with 10 nodes. Your application checks `zen-lead/role` annotation.
+
+### Use Case 2: Legacy Applications
+
+**Problem:** Legacy application can't be modified, but needs HA.
+
+**Solution:** Add annotations to Deployment. Application checks pod annotation (via kubectl or initContainer).
+
+**Result:** Leader election without code changes.
+
+### Use Case 3: Third-Party Containers
+
+**Problem:** Vendor container doesn't support leader election, but you need HA.
+
+**Solution:** Use zen-lead annotations. Check leader status via sidecar or initContainer.
+
+**Result:** Leader election for unmodifiable containers.
+
+### Use Case 4: Controller HA
 
 **Problem:** Your operator runs 3 replicas, but they all try to reconcile the same resources.
 
@@ -74,22 +116,6 @@ annotations:
 ```
 
 **Result:** Only 1 replica actively reconciles. Others wait in standby.
-
-### Use Case 2: Exclusive CronJobs
-
-**Problem:** CronJob runs on 3 nodes, sends 3 duplicate emails.
-
-**Solution:**
-```yaml
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: daily-report
-  annotations:
-    zen-lead/pool: report-generator
-```
-
-**Result:** Only 1 cluster instance executes, even with 10 nodes.
 
 ### Use Case 3: Distributed Locking
 
@@ -127,22 +153,35 @@ metadata:
 
 ## 📚 Documentation
 
+- [OSS Use Cases](docs/OSS_USE_CASES.md) - Detailed use cases for components without leader election
+- [Comparison](docs/COMPARISON.md) - zen-lead vs zen-sdk/pkg/leader
+- [OSS Positioning](docs/OSS_POSITIONING.md) - Why zen-lead is open-source
 - [Architecture](docs/ARCHITECTURE.md) - Detailed architecture documentation
 - [API Reference](docs/API.md) - LeaderPolicy CRD specification
 - [Examples](examples/) - Example configurations
 - [Integration Guide](docs/INTEGRATION.md) - How to integrate with your controllers
 
-## 🤝 Integration with Zen Suite
+## 🤝 When to Use zen-lead vs zen-sdk
 
-### zen-flow + zen-lead
+### Use zen-lead (OSS Controller) When:
 
-```yaml
-# zen-flow Deployment
-annotations:
-  zen-lead/pool: flow-controller
-```
+- ✅ **CronJobs** - No native leader election support
+- ✅ **DaemonSets** - Need only one active pod
+- ✅ **Legacy Apps** - Can't modify application code
+- ✅ **Third-Party Apps** - Vendor containers you can't change
+- ✅ **Multi-Language** - Python, Node.js, Java, Bash, etc.
+- ✅ **No Code Access** - Can't import libraries
 
-**Result:** Only 1 replica actively reconciles JobFlows.
+### Use zen-sdk/pkg/leader (Library) When:
+
+- ✅ **Controller-Runtime** - Using controller-runtime framework
+- ✅ **Go Applications** - Can import Go libraries
+- ✅ **Source Code Access** - Can modify application code
+
+**Example:** zen-flow and zen-lock use `zen-sdk/pkg/leader` (they're controller-runtime based).  
+**Example:** CronJobs and legacy apps use `zen-lead` (they can't import libraries).
+
+See [COMPARISON.md](docs/COMPARISON.md) for detailed comparison.
 
 ### zen-watcher + zen-lead
 
@@ -223,8 +262,20 @@ make run
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
 
+## 🌟 Why Open Source?
+
+Zen-Lead is **open-source** because leader election is needed by many Kubernetes workloads, but not all support it:
+- CronJobs don't have leader election
+- DaemonSets don't have leader election  
+- Legacy applications can't be modified
+- Third-party containers can't be changed
+
+**zen-lead provides leader election for components that don't support it.**
+
 ---
 
 **Repository:** [github.com/kube-zen/zen-lead](https://github.com/kube-zen/zen-lead)  
+**License:** Apache License 2.0  
+**Status:** Production-ready OSS  
 **Version:** 0.1.0-alpha
 
