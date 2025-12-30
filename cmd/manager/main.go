@@ -28,11 +28,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	coordinationv1alpha1 "github.com/kube-zen/zen-lead/pkg/apis/coordination.kube-zen.io/v1alpha1"
 	"github.com/kube-zen/zen-lead/pkg/controller"
 	"github.com/kube-zen/zen-lead/pkg/director"
 	"github.com/kube-zen/zen-lead/pkg/pool"
+	zenleadwebhook "github.com/kube-zen/zen-lead/pkg/webhook"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -110,6 +112,20 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Director")
 		os.Exit(1)
 	}
+
+	// Setup Validating Admission Webhook (Gatekeeper pattern)
+	// This webhook actively rejects Pod creation requests from non-leader replicas
+	zenleadWebhook, err := zenleadwebhook.NewZenLeadValidatingWebhook(mgr.GetClient(), mgr.GetScheme())
+	if err != nil {
+		setupLog.Error(err, "unable to create validating webhook")
+		os.Exit(1)
+	}
+
+	// Register webhook with manager
+	mgr.GetWebhookServer().Register("/validate-pods", &admission.Webhook{
+		Handler: zenleadWebhook,
+	})
+	setupLog.Info("Registered zen-lead validating webhook", "path", "/validate-pods")
 
 	// Setup health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
