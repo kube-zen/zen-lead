@@ -321,7 +321,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return "none"
 		}())
 		if r.Metrics != nil {
-			// : Record failover with reason
+			// Record failover with reason
 			reason := "noneReady"
 			if currentLeaderPod != nil {
 				if currentLeaderPod.DeletionTimestamp != nil {
@@ -661,7 +661,7 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 		return fmt.Errorf("failed to reconcile endpoint slice: %w", err)
 	}
 
-	// Record leader stability and endpoint status 
+	// Record leader stability and endpoint status
 	if r.Metrics != nil {
 		if leaderPod != nil && isPodReady(leaderPod) {
 			r.Metrics.RecordLeaderStable(svc.Namespace, svc.Name, true)
@@ -854,7 +854,7 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 		}
 
 		if err := r.Create(ctx, endpointSlice); err != nil {
-			// : Record endpoint write error
+			// Record endpoint write error
 			if r.Metrics != nil {
 				r.Metrics.RecordEndpointWriteError(svc.Namespace, svc.Name)
 			}
@@ -881,7 +881,7 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 	endpointSlice.AddressType = addressType
 
 	if err := r.Patch(ctx, endpointSlice, client.MergeFrom(originalEndpointSlice)); err != nil {
-		// : Record endpoint write error
+		// Record endpoint write error
 		if r.Metrics != nil {
 			r.Metrics.RecordEndpointWriteError(svc.Namespace, svc.Name)
 		}
@@ -1015,7 +1015,7 @@ func (r *ServiceDirectorReconciler) getLeaderServiceName(svc *corev1.Service) st
 }
 
 // SetupWithManager sets up the ServiceDirectorReconciler with the manager
-// : Pod watch predicates filter to meaningful transitions only (Ready, deletionTimestamp, podIP, phase)
+// Pod watch predicates filter to meaningful transitions only (Ready, deletionTimestamp, podIP, phase)
 func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Pod watch predicate - only react to meaningful transitions
 	podPredicate := predicate.Funcs{
@@ -1147,7 +1147,7 @@ func (r *ServiceDirectorReconciler) mapEndpointSliceToService(ctx context.Contex
 	}
 }
 
-// updateOptedInServicesCache updates the cache for a specific namespace 
+// updateOptedInServicesCache updates the cache for a specific namespace
 func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Context, namespace string, logger klog.Logger) {
 	serviceList := &corev1.ServiceList{}
 	if err := r.List(ctx, serviceList, client.InNamespace(namespace)); err != nil {
@@ -1174,7 +1174,7 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 	r.optedInServicesCache[namespace] = cached
 }
 
-// updateOptedInServicesCacheForService updates cache for a single Service 
+// updateOptedInServicesCacheForService updates cache for a single Service
 func (r *ServiceDirectorReconciler) updateOptedInServicesCacheForService(svc *corev1.Service, logger klog.Logger) {
 	if svc.Annotations == nil || svc.Annotations[AnnotationEnabledService] != "true" {
 		// Not opted in - remove from cache if present
