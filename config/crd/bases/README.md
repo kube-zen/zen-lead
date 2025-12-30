@@ -1,27 +1,21 @@
 # CRD Bases
 
-This directory contains generated CRD manifests.
+This directory would contain generated CRD manifests if CRDs were used.
 
-## Generating CRDs
+## Current Status
 
-To generate CRDs from the API types, run:
+**Zen-Lead does NOT use CRDs for day-0 functionality.**
 
-```bash
-# Install controller-gen if not already installed
-go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+Zen-Lead uses a **Service-annotation opt-in** approach:
+- Services opt-in via `zen-lead.io/enabled: "true"` annotation
+- No CRDs required
+- No pod mutation
+- Non-invasive design
 
-# Generate CRDs
-controller-gen rbac:roleName=zen-lead-role crd webhook paths="./pkg/apis/..." output:crd:artifacts:config=config/crd/bases
-```
+## Historical Note
 
-## CRD Files
+Previous versions of zen-lead used a `LeaderPolicy` CRD, but this has been removed in favor of the Service-annotation approach for better community adoption and non-invasive operation.
 
-After generation, you should see:
-- `coordination.kube-zen.io_leaderpolicies.yaml` - LeaderPolicy CRD definition
+## Future CRDs
 
-## Installing CRDs
-
-```bash
-kubectl apply -f config/crd/bases/
-```
-
+Future versions may introduce optional CRDs for advanced features, but day-0 functionality will always remain CRD-free.

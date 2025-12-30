@@ -1,16 +1,20 @@
 # Zen-Lead Roadmap
 
-## Phase 1: Basic Leader Election ✅ (Current)
+**Last Updated:** 2025-12-30
+
+## Phase 1: Day-0 MVP ✅ (Complete)
 
 **Status:** ✅ Complete
 
-- [x] LeaderPolicy CRD
-- [x] Annotation-based participation
-- [x] Lease-based leader election
-- [x] Status API
-- [x] Pod role annotations
-- [x] Controller implementation
-- [x] Documentation
+- [x] Service-annotation opt-in (`zen-lead.io/enabled: "true"`)
+- [x] Selector-less leader Service creation
+- [x] EndpointSlice management for leader routing
+- [x] Controller-driven leader selection (sticky, oldest Ready)
+- [x] Automatic failover on leader pod failure
+- [x] Fail-closed port resolution (named targetPort support)
+- [x] Prometheus metrics and Grafana dashboard
+- [x] Helm chart with secure defaults
+- [x] Comprehensive documentation
 
 ## Phase 2: Follower Mode Enhancements
 
@@ -90,6 +94,18 @@
 - [ ] Caching for frequent queries
 - [ ] Batch updates
 - [ ] Optimized reconciliation
+
+### Latency Optimizations (Optional)
+
+**Status:** 🔄 Future (Not Required)
+
+The following optimizations can reduce failover latency but are **not required** for zen-lead to work on vanilla Kubernetes:
+
+- [ ] **eBPF Dataplanes (Cilium)**: Cilium's eBPF-based kube-proxy replacement can provide faster EndpointSlice propagation
+- [ ] **IPVS kube-proxy**: IPVS mode can reduce failover latency compared to iptables mode
+- [ ] **kube-proxy Tuning**: Tuning kube-proxy sync periods and conntrack settings
+
+**Note:** zen-lead works correctly on vanilla Kubernetes with default kube-proxy (iptables mode). These optimizations are optional and only reduce dataplane convergence time, not controller-side detection time.
 
 ## Integration Roadmap
 

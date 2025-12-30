@@ -27,15 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	coordinationv1alpha1 "github.com/kube-zen/zen-lead/pkg/apis/coordination.kube-zen.io/v1alpha1"
-	"github.com/kube-zen/zen-lead/pkg/controller"
 	"github.com/kube-zen/zen-lead/pkg/director"
-	"github.com/kube-zen/zen-lead/pkg/pool"
-	zenleadwebhook "github.com/kube-zen/zen-lead/pkg/webhook"
-	//+kubebuilder:scaffold:imports
 )
 
 var (
@@ -45,20 +38,18 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(coordinationv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
 func main() {
 	var metricsAddr string
-	var enableLeaderElection bool
+	var leaderElectionID string
 	var probeAddr string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
-		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
+	flag.StringVar(&leaderElectionID, "leader-election-id", "zen-lead-controller-leader-election",
+		"The ID for leader election. Must be unique per controller instance in the same namespace.")
 
 	opts := zap.Options{
 		Development: true,
@@ -68,64 +59,42 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	namespace := os.Getenv("WATCH_NAMESPACE")
-	if namespace == "" {
-		namespace = os.Getenv("POD_NAMESPACE")
+	// Leader election namespace from Downward API (POD_NAMESPACE)
+	leaderElectionNS := os.Getenv("POD_NAMESPACE")
+	if leaderElectionNS == "" {
+		setupLog.Error(nil, "POD_NAMESPACE environment variable must be set for leader election")
+		os.Exit(1)
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// H012.3: Set REST config QPS/Burst to avoid self-throttling under churn
+	restConfig := ctrl.GetConfigOrDie()
+	restConfig.QPS = 50   // Default is 20, increase for faster reconciliation
+	restConfig.Burst = 100 // Default is 30, increase for burst handling
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
 		},
-		WebhookServer: webhook.NewServer(webhook.Options{
-			Port: 9443,
-		}),
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "zen-lead-controller-leader-election",
-		LeaderElectionNamespace: namespace,
+		HealthProbeBindAddress:  probeAddr,
+		LeaderElection:          true, // Always enabled for HA safety
+		LeaderElectionID:        leaderElectionID,
+		LeaderElectionNamespace: leaderElectionNS,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
-	// Create pool manager
-	poolMgr := pool.NewManager(mgr.GetClient())
-
-	// Setup LeaderPolicy controller
-	if err = (&controller.LeaderPolicyReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		PoolMgr: poolMgr,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "LeaderPolicy")
+	// Setup Service Director controller (traffic routing to leader pods)
+	// Non-invasive Service-based approach: watches Services with zen-lead.io/enabled annotation
+	eventRecorder := mgr.GetEventRecorderFor("zen-lead-controller")
+	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder)
+	if err = reconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ServiceDirector")
 		os.Exit(1)
 	}
-
-	// Setup Director controller (traffic routing to leader pods)
-	if err = (&director.DirectorReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Director")
-		os.Exit(1)
-	}
-
-	// Setup Validating Admission Webhook (Gatekeeper pattern)
-	// This webhook actively rejects Pod creation requests from non-leader replicas
-	zenleadWebhook, err := zenleadwebhook.NewZenLeadValidatingWebhook(mgr.GetClient(), mgr.GetScheme())
-	if err != nil {
-		setupLog.Error(err, "unable to create validating webhook")
-		os.Exit(1)
-	}
-
-	// Register webhook with manager
-	mgr.GetWebhookServer().Register("/validate-pods", &admission.Webhook{
-		Handler: zenleadWebhook,
-	})
-	setupLog.Info("Registered zen-lead validating webhook", "path", "/validate-pods")
+	setupLog.Info("Service Director controller enabled")
 
 	// Setup health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -144,4 +113,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-

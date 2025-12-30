@@ -4,92 +4,129 @@ Get zen-lead up and running in 5 minutes!
 
 ## Prerequisites
 
-- Kubernetes cluster (1.26+)
+- Kubernetes cluster (1.23+)
 - kubectl configured
-- Go 1.24+ (for building from source)
+- Helm 3.0+ (for installation)
 
-## Step 1: Install Dependencies
-
-```bash
-# Install controller-gen (for CRD generation)
-go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
-
-# Install Go dependencies
-go mod tidy
-```
-
-## Step 2: Generate CRDs
+## Step 1: Install Zen-Lead
 
 ```bash
-make generate
-```
+# Using Helm (recommended)
+helm install zen-lead zen-lead/zen-lead \
+  --namespace default \
+  --create-namespace
 
-This creates the CRD manifests in `config/crd/bases/`.
-
-## Step 3: Install Zen-Lead
-
-```bash
-# Install CRDs
-make install
-
-# Install RBAC
+# Or using kubectl
 kubectl apply -f config/rbac/
-
-# Install Controller
 kubectl apply -f deploy/
 ```
 
-## Step 4: Verify Installation
+## Step 2: Verify Installation
 
 ```bash
 # Check controller is running
-kubectl get pods -n zen-system -l app=zen-lead
+kubectl get pods -l app.kubernetes.io/name=zen-lead
 
-# Check CRD is installed
-kubectl get crd leaderpolicies.coordination.kube-zen.io
+# Check metrics endpoint
+kubectl port-forward -l app.kubernetes.io/name=zen-lead 8080:8080
+curl http://localhost:8080/metrics | grep zen_lead
 ```
 
-## Step 5: Create Your First LeaderPolicy
+## Step 3: Deploy Your Application
 
-```bash
-kubectl apply -f examples/leaderpolicy.yaml
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+          name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+  annotations:
+    zen-lead.io/enabled: "true"  # Enable zen-lead
+spec:
+  selector:
+    app: my-app
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http
 ```
 
-## Step 6: Annotate a Deployment
+## Step 4: Verify Leader Service
 
 ```bash
-# Create a test deployment
-kubectl create deployment test-app --image=nginx --replicas=3
+# Check leader Service was created
+kubectl get service my-app-leader
 
-# Add annotations
-kubectl annotate deployment test-app zen-lead/pool=my-controller-pool
-kubectl annotate deployment test-app zen-lead/join=true
+# Verify selector is null (selector-less)
+kubectl get service my-app-leader -o jsonpath='{.spec.selector}'
+# Should return: null
 
-# Restart pods to pick up annotations
-kubectl rollout restart deployment test-app
+# Check EndpointSlice
+kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader
+
+# Verify exactly one endpoint (leader pod)
+kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -o jsonpath='{.items[*].endpoints[*].addresses}'
 ```
 
-## Step 7: Check Status
+## Step 5: Use the Leader Service
+
+Update your application to connect to `my-app-leader` instead of `my-app`:
+
+```yaml
+# Deployment environment variable
+env:
+- name: SERVICE_NAME
+  value: my-app-leader  # Points only to current leader
+```
+
+## Step 6: Test Failover
 
 ```bash
-# Check LeaderPolicy status
-kubectl get leaderpolicy my-controller-pool
+# Get current leader pod
+LEADER_POD=$(kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -o jsonpath='{.items[0].endpoints[0].targetRef.name}')
 
-# Check which pod is the leader
-kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.zen-lead/role}{"\n"}{end}'
+# Delete leader pod
+kubectl delete pod $LEADER_POD
+
+# Watch for new leader
+kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -w
 ```
 
 ## Next Steps
 
-- Read [INTEGRATION.md](docs/INTEGRATION.md) for detailed integration examples
-- Check [USE_CASES.md](docs/USE_CASES.md) for use case patterns
-- Review [ARCHITECTURE.md](docs/ARCHITECTURE.md) for architecture details
+- See [INTEGRATION.md](docs/INTEGRATION.md) for detailed integration patterns
+- See [USE_CASES.md](docs/USE_CASES.md) for use case examples
+- See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues
 
-## Troubleshooting
+## Uninstall
 
-See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues and solutions.
+```bash
+# Remove annotation from Services
+kubectl annotate service my-app zen-lead.io/enabled-
 
----
-
-**That's it! You now have HA leader election configured.** 🎉
-
+# Uninstall zen-lead
+helm uninstall zen-lead
+# Or
+kubectl delete -f deploy/
+kubectl delete -f config/rbac/
+```

@@ -2,312 +2,311 @@
 
 ## Common Issues
 
-### Issue: No Leader Elected
+### Issue: Leader Service Has No Endpoints
 
 **Symptoms:**
-- `kubectl get leaderpolicy` shows `phase: Electing`
-- `status.currentHolder` is `null`
-- No pods are marked as leader
+- `kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader` shows no endpoints
+- Leader Service exists but traffic doesn't route anywhere
+- Metrics show `zen_lead_leader_service_without_endpoints = 1`
 
 **Diagnosis:**
 ```bash
-# Check if LeaderPolicy exists
-kubectl get leaderpolicy <pool-name>
+# Check EndpointSlice
+kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader -o yaml
 
-# Check for candidate pods
-kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.zen-lead/pool}{"\n"}{end}'
+# Check if any pods are Ready
+kubectl get pods -l <selector> --field-selector=status.phase=Running
 
-# Check if pods are participating
-kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.zen-lead/join}{"\n"}{end}'
+# Check pod readiness
+kubectl get pods -l <selector> -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
 
-# Check Lease resource
-kubectl get lease <pool-name>
+# Check controller logs
+kubectl logs -l app.kubernetes.io/name=zen-lead --tail=100 | grep -i reconcile
 ```
 
 **Possible Causes:**
-1. No pods with pool annotation
-2. Pods not running
-3. Pods missing `zen-lead/join: "true"` annotation
-4. RBAC issues preventing lease creation
+1. No pods matching Service selector
+2. No pods are Ready (readiness probe failing)
+3. Service has no selector
+4. Controller not running or has errors
 
 **Solutions:**
 ```bash
-# Verify pod annotations
-kubectl get pod <pod-name> -o yaml | grep -A 5 annotations
+# Verify Service has selector
+kubectl get service <service> -o jsonpath='{.spec.selector}'
+
+# Check pod readiness probes
+kubectl get pod <pod-name> -o jsonpath='{.spec.containers[*].readinessProbe}'
+
+# Verify controller is running
+kubectl get pods -l app.kubernetes.io/name=zen-lead
+
+# Check for reconciliation errors
+kubectl logs -l app.kubernetes.io/name=zen-lead | grep -i error
+```
+
+---
+
+### Issue: Port Resolution Fails
+
+**Symptoms:**
+- Warning events: `NamedPortResolutionFailed`
+- Metrics show `zen_lead_port_resolution_failures_total > 0`
+- EndpointSlice uses fallback port instead of container port
+
+**Diagnosis:**
+```bash
+# Check events
+kubectl get events --field-selector involvedObject.name=<service> --sort-by='.lastTimestamp'
+
+# Verify container port names match targetPort
+kubectl get pod <leader-pod> -o jsonpath='{.spec.containers[*].ports[*].name}'
+kubectl get service <service> -o jsonpath='{.spec.ports[*].targetPort}'
+
+# Check EndpointSlice ports
+kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader -o jsonpath='{.items[*].ports[*].port}'
+```
+
+**Possible Causes:**
+1. Container port name doesn't match Service targetPort name
+2. Leader pod doesn't have the named port
+3. Multiple containers with different port names
+
+**Solutions:**
+```bash
+# Ensure container port names match Service targetPort names
+# Example:
+# Service: targetPort: http
+# Pod: containerPort: 8080, name: http  # Must match
+
+# Verify leader pod has the port
+kubectl get pod <leader-pod> -o yaml | grep -A 5 ports
+```
+
+---
+
+### Issue: Leader Doesn't Change on Failure
+
+**Symptoms:**
+- Leader pod becomes NotReady but EndpointSlice still points to it
+- Failover doesn't occur
+- Old leader pod still receives traffic
+
+**Diagnosis:**
+```bash
+# Check pod readiness
+kubectl get pod <leader-pod> -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+
+# Check EndpointSlice endpoint
+kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader -o yaml
+
+# Check controller reconciliation
+kubectl logs -l app.kubernetes.io/name=zen-lead | grep -i reconcile
+
+# Check sticky leader setting
+kubectl get service <service> -o jsonpath='{.metadata.annotations.zen-lead\.io/sticky}'
+```
+
+**Possible Causes:**
+1. Controller not reconciling (check logs)
+2. Pod readiness not transitioning properly
+3. Sticky leader enabled but old leader still appears Ready
+4. Controller pod not running
+
+**Solutions:**
+```bash
+# Verify controller is running
+kubectl get pods -l app.kubernetes.io/name=zen-lead
+
+# Check reconciliation frequency
+kubectl logs -l app.kubernetes.io/name=zen-lead | grep "Reconciling"
+
+# Disable sticky leader if needed (for testing)
+kubectl annotate service <service> zen-lead.io/sticky=false
+
+# Force reconciliation by updating Service annotation
+kubectl annotate service <service> zen-lead.io/enabled=true --overwrite
+```
+
+---
+
+### Issue: Multiple Endpoints in EndpointSlice
+
+**Symptoms:**
+- EndpointSlice has more than one endpoint
+- Multiple pods receiving traffic
+
+**Diagnosis:**
+```bash
+# Check EndpointSlice endpoints
+kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader -o jsonpath='{.items[*].endpoints[*].addresses}'
+
+# Verify only one endpoint exists
+kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader -o yaml
+```
+
+**Possible Causes:**
+1. Controller bug (should never happen)
+2. Manual EndpointSlice modification
+3. Multiple controllers running
+
+**Solutions:**
+```bash
+# Delete EndpointSlice (controller will recreate)
+kubectl delete endpointslice -l kubernetes.io/service-name=<service>-leader
+
+# Verify only one controller instance
+kubectl get pods -l app.kubernetes.io/name=zen-lead
+```
+
+---
+
+### Issue: Leader Service Not Created
+
+**Symptoms:**
+- Service has `zen-lead.io/enabled: "true"` annotation
+- No `<service>-leader` Service exists
+
+**Diagnosis:**
+```bash
+# Verify annotation
+kubectl get service <service> -o jsonpath='{.metadata.annotations.zen-lead\.io/enabled}'
+
+# Check controller logs
+kubectl logs -l app.kubernetes.io/name=zen-lead | grep <service>
+
+# Check for errors
+kubectl logs -l app.kubernetes.io/name=zen-lead | grep -i error
+```
+
+**Possible Causes:**
+1. Annotation value is not exactly "true" (case-sensitive)
+2. Service has no selector
+3. Controller not running
+4. RBAC permissions missing
+
+**Solutions:**
+```bash
+# Verify annotation format
+kubectl get service <service> -o yaml | grep zen-lead.io
+
+# Ensure Service has selector
+kubectl get service <service> -o jsonpath='{.spec.selector}'
 
 # Check RBAC
-kubectl auth can-i create leases --namespace=<namespace>
+kubectl auth can-i create services --as=system:serviceaccount:<namespace>:zen-lead
 
-# Check controller logs
-kubectl logs -n zen-system -l app=zen-lead
+# Check controller logs for specific errors
+kubectl logs -l app.kubernetes.io/name=zen-lead --tail=200
 ```
 
 ---
 
-### Issue: Multiple Leaders
+### Issue: High Failover Rate
 
 **Symptoms:**
-- Multiple pods show `zen-lead/role: leader`
-- Duplicate processing occurs
-
-**Diagnosis:**
-```bash
-# Check pod roles
-kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.zen-lead/role}{"\n"}{end}'
-
-# Check Lease resource
-kubectl get lease <pool-name> -o yaml
-
-# Check system time (clock skew)
-date
-```
-
-**Possible Causes:**
-1. Clock skew between nodes
-2. Network partition
-3. Lease API bug (rare)
-4. Controller bug
-
-**Solutions:**
-```bash
-# Verify system time synchronization
-kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.nodeInfo.systemUUID}{"\n"}{end}'
-
-# Check Lease holder
-kubectl get lease <pool-name> -o jsonpath='{.spec.holderIdentity}'
-
-# Restart controller if needed
-kubectl rollout restart deployment/zen-lead-controller-manager -n zen-system
-```
-
----
-
-### Issue: Leader Not Processing
-
-**Symptoms:**
-- `status.currentHolder` is set
-- Pod has `zen-lead/role: leader`
-- But application not doing work
-
-**Diagnosis:**
-```bash
-# Check leader pod
-kubectl get pod <leader-pod-name> -o yaml
-
-# Check pod logs
-kubectl logs <leader-pod-name>
-
-# Verify annotation
-kubectl get pod <leader-pod-name> -o jsonpath='{.metadata.annotations.zen-lead/role}'
-```
-
-**Possible Causes:**
-1. Application not checking annotation
-2. Application crashed
-3. Context cancellation
-4. Application waiting for other conditions
-
-**Solutions:**
-```bash
-# Check application logs
-kubectl logs <leader-pod-name> -c <container-name>
-
-# Verify application is checking annotation
-# Application should check: metadata.annotations['zen-lead/role'] == 'leader'
-
-# Check pod status
-kubectl describe pod <leader-pod-name>
-```
-
----
-
-### Issue: Frequent Leadership Changes
-
-**Symptoms:**
+- Metrics show `zen_lead_failover_count_total` increasing rapidly
 - Leader changes frequently
-- `status.lastTransitionTime` changes often
-- Pods alternating between leader/follower
+- Alert: `ZenLeadHighFailoverRate`
 
 **Diagnosis:**
 ```bash
-# Watch leader changes
-kubectl get leaderpolicy <pool-name> -w
+# Check failover rate
+kubectl port-forward -l app.kubernetes.io/name=zen-lead 8080:8080
+curl http://localhost:8080/metrics | grep zen_lead_failover_count_total
 
-# Check API server latency
-kubectl get lease <pool-name> -v=9
+# Check pod readiness stability
+kubectl get pods -l <selector> -w
 
-# Check pod resource usage
-kubectl top pods -l app=<your-app>
+# Check reconciliation duration
+curl http://localhost:8080/metrics | grep zen_lead_reconciliation_duration_seconds
 ```
 
 **Possible Causes:**
-1. High API server latency
-2. Pod resource constraints (CPU throttling, OOM)
-3. Network issues
-4. Lease duration too short
+1. Pod readiness probes flapping
+2. Pods restarting frequently
+3. Network issues causing readiness failures
+4. Resource constraints causing pod evictions
 
 **Solutions:**
 ```bash
-# Increase lease duration
-kubectl patch leaderpolicy <pool-name> --type=merge -p '{"spec":{"leaseDurationSeconds":30}}'
+# Check pod readiness probe configuration
+kubectl get pod <pod-name> -o jsonpath='{.spec.containers[*].readinessProbe}'
 
-# Check for OOMKills
-kubectl describe pod <pod-name> | grep -i oom
+# Review pod events
+kubectl describe pod <pod-name>
 
-# Check API server health
-kubectl get --raw /healthz
+# Check resource usage
+kubectl top pods -l <selector>
+
+# Adjust readiness probe if too aggressive
+# Consider increasing initialDelaySeconds or periodSeconds
 ```
 
 ---
 
-### Issue: Pod Not Joining Pool
+## Debugging Commands
 
-**Symptoms:**
-- Pod has `zen-lead/pool` annotation
-- But not showing up in `status.candidates`
+### Inspect Leader Service
 
-**Diagnosis:**
 ```bash
-# Check pod annotations
-kubectl get pod <pod-name> -o jsonpath='{.metadata.annotations}'
+# Get leader Service
+kubectl get service <service>-leader -o yaml
 
-# Verify join annotation
-kubectl get pod <pod-name> -o jsonpath='{.metadata.annotations.zen-lead/join}'
+# Check labels
+kubectl get service <service>-leader -o jsonpath='{.metadata.labels}'
 
-# Check pod phase
-kubectl get pod <pod-name> -o jsonpath='{.status.phase}'
+# Verify selector is null
+kubectl get service <service>-leader -o jsonpath='{.spec.selector}'
 ```
 
-**Possible Causes:**
-1. Missing `zen-lead/join: "true"` annotation
-2. Pod not in Running phase
-3. Wrong namespace
-4. Pool name mismatch
-
-**Solutions:**
-```bash
-# Add join annotation
-kubectl annotate pod <pod-name> zen-lead/join=true
-
-# Verify pod is running
-kubectl get pod <pod-name>
-
-# Check namespace matches LeaderPolicy
-kubectl get leaderpolicy <pool-name> -o jsonpath='{.metadata.namespace}'
-```
-
----
-
-### Issue: RBAC Errors
-
-**Symptoms:**
-- Controller logs show permission errors
-- Lease resources not created
-- Pod annotations not updated
-
-**Diagnosis:**
-```bash
-# Check controller logs
-kubectl logs -n zen-system -l app=zen-lead | grep -i error
-
-# Test RBAC
-kubectl auth can-i create leases --namespace=<namespace> --as=system:serviceaccount:zen-system:zen-lead-controller-manager
-
-# Check ServiceAccount
-kubectl get serviceaccount zen-lead-controller-manager -n zen-system
-```
-
-**Solutions:**
-```bash
-# Reapply RBAC
-kubectl apply -f config/rbac/
-
-# Verify RoleBinding
-kubectl get clusterrolebinding zen-lead-rolebinding
-
-# Check ClusterRole
-kubectl get clusterrole zen-lead-role
-```
-
----
-
-## Debugging Tips
-
-### Enable Verbose Logging
+### Inspect EndpointSlice
 
 ```bash
-# Set log level in Deployment
-kubectl set env deployment/zen-lead-controller-manager LOG_LEVEL=debug -n zen-system
+# Get EndpointSlice
+kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader -o yaml
+
+# Check endpoints
+kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader -o jsonpath='{.items[*].endpoints[*]}'
+
+# Verify managed-by label
+kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader -o jsonpath='{.items[*].metadata.labels.endpointslice\.kubernetes\.io/managed-by}'
 ```
 
 ### Check Controller Status
 
 ```bash
-# Get controller pod
-kubectl get pods -n zen-system -l app=zen-lead
+# Get controller pods
+kubectl get pods -l app.kubernetes.io/name=zen-lead
 
-# Check controller logs
-kubectl logs -n zen-system -l app=zen-lead --tail=100
+# Check logs
+kubectl logs -l app.kubernetes.io/name=zen-lead --tail=100
 
-# Check controller metrics
-kubectl port-forward -n zen-system svc/zen-lead-controller-manager 8080:8080
-curl http://localhost:8080/metrics
+# Check metrics
+kubectl port-forward -l app.kubernetes.io/name=zen-lead 8080:8080
+curl http://localhost:8080/metrics | grep zen_lead
 ```
 
-### Monitor Leader Changes
+### Verify RBAC
 
 ```bash
-# Watch LeaderPolicy status
-kubectl get leaderpolicy <pool-name> -w -o jsonpath='{.status.currentHolder.name}{"\n"}'
+# Check ServiceAccount
+kubectl get serviceaccount -l app.kubernetes.io/name=zen-lead
 
-# Watch pod role annotations
-watch -n 1 'kubectl get pods -o jsonpath="{range .items[*]}{.metadata.name}{\"\t\"}{.metadata.annotations.zen-lead/role}{\"\n\"}{end}"'
+# Verify permissions
+kubectl auth can-i create services --as=system:serviceaccount:<namespace>:zen-lead
+kubectl auth can-i create endpointslices --as=system:serviceaccount:<namespace>:zen-lead
+kubectl auth can-i patch pods --as=system:serviceaccount:<namespace>:zen-lead
+# Should return: no (no pod mutation)
 ```
-
-### Check Lease Resource
-
-```bash
-# Get Lease details
-kubectl get lease <pool-name> -o yaml
-
-# Check holder identity
-kubectl get lease <pool-name> -o jsonpath='{.spec.holderIdentity}'
-
-# Check lease duration
-kubectl get lease <pool-name> -o jsonpath='{.spec.leaseDurationSeconds}'
-```
-
----
-
-## Performance Issues
-
-### High Reconciliation Frequency
-
-**Symptom:** Controller reconciling too often
-
-**Solution:** Adjust requeue interval in controller (default: 5 seconds)
-
-### API Server Overload
-
-**Symptom:** High API server latency
-
-**Solution:**
-- Increase lease duration
-- Reduce reconciliation frequency
-- Check API server health
 
 ---
 
 ## Getting Help
 
-If you're still experiencing issues:
+If you encounter issues not covered here:
 
-1. **Check Logs:** Controller and application logs
-2. **Verify Configuration:** LeaderPolicy spec and pod annotations
-3. **Test RBAC:** Ensure permissions are correct
-4. **Open an Issue:** Provide logs and configuration
-
----
-
-**See [INTEGRATION.md](INTEGRATION.md) for integration examples.**
-
+1. Check [GitHub Issues](https://github.com/kube-zen/zen-lead/issues)
+2. Review [Architecture Documentation](ARCHITECTURE.md)
+3. Check controller logs: `kubectl logs -l app.kubernetes.io/name=zen-lead`
+4. Review events: `kubectl get events --sort-by='.lastTimestamp'`

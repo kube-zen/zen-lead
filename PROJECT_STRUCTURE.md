@@ -4,82 +4,122 @@
 zen-lead/
 ├── cmd/
 │   └── manager/              # Main controller binary
-│       └── main.go           # Entry point
+│       └── main.go           # Entry point, controller setup
 │
 ├── pkg/
-│   ├── apis/                 # CRD API definitions
-│   │   └── coordination.kube-zen.io/
-│   │       └── v1alpha1/
-│   │           ├── groupversion_info.go
-│   │           └── leaderpolicy_types.go
+│   ├── director/            # Service director (core controller)
+│   │   ├── service_director.go      # Service-watching reconciler
+│   │   └── strategy.go              # Leader selection strategies
 │   │
-│   ├── controller/           # Controller logic
-│   │   ├── leaderpolicy_controller.go
-│   │   └── pod_event_handler.go
+│   ├── metrics/             # Prometheus metrics
+│   │   ├── metrics.go       # Metrics definitions
+│   │   └── metrics_test.go  # Metrics tests
 │   │
-│   ├── election/             # Leader election wrapper
-│   │   └── election.go
+│   ├── client/              # Client SDK (optional, for application integration)
+│   │   └── client.go
 │   │
-│   └── pool/                 # Pool management
-│       └── pool.go
+│   └── election/            # Election utilities (reference implementation)
+│       └── election.go
 │
 ├── config/
-│   ├── crd/
-│   │   └── bases/            # Generated CRD manifests
-│   └── rbac/                 # RBAC manifests
+│   └── rbac/                # RBAC manifests
+│       ├── role.yaml       # ClusterRole (non-invasive minimum)
+│       ├── role_binding.yaml
+│       └── service_account.yaml
 │
-├── deploy/                   # Deployment manifests
+├── deploy/                  # Deployment manifests
+│   ├── deployment.yaml      # Controller deployment
+│   ├── prometheus/          # Prometheus alert rules
+│   │   └── prometheus-rules.yaml
+│   └── grafana/             # Grafana dashboard
+│       └── dashboard.json
 │
-├── examples/                 # Example configurations
-│   ├── leaderpolicy.yaml
-│   ├── deployment-with-pool.yaml
-│   └── cronjob-with-pool.yaml
+├── examples/                # Example configurations
+│   ├── basic-service.yaml
+│   ├── named-targetport.yaml
+│   └── multi-port-service.yaml
 │
-├── go.mod                    # Go module definition
-├── go.sum                    # Go dependencies
-├── Makefile                  # Build automation
-├── README.md                 # Main documentation
-└── LICENSE                   # Apache 2.0 license
+├── docs/                    # Documentation
+│   ├── ARCHITECTURE.md      # Architecture overview
+│   ├── INTEGRATION.md       # Integration guide
+│   ├── TROUBLESHOOTING.md   # Troubleshooting guide
+│   └── USE_CASES.md         # Use case examples
+│
+├── test/                    # Tests
+│   └── integration/         # Integration tests
+│
+├── go.mod                   # Go module definition
+├── go.sum                   # Go dependencies
+├── Makefile                 # Build automation
+├── README.md                # Main documentation
+└── LICENSE                  # Apache 2.0 license
 ```
 
 ## Key Components
 
-### CRD API (`pkg/apis/coordination.kube-zen.io/v1alpha1/`)
+### ServiceDirector (`pkg/director/service_director.go`)
 
-- **LeaderPolicy**: Defines a pool of candidates and election configuration
-- **LeaderPolicySpec**: Configuration (lease duration, identity strategy, follower mode)
-- **LeaderPolicyStatus**: Current state (phase, leader, candidates)
+**Core Controller:**
+- Watches `corev1.Service` resources
+- Detects `zen-lead.io/enabled: "true"` annotation
+- Creates/updates selector-less leader Service
+- Creates/updates EndpointSlice pointing to leader pod
+- Resolves named targetPorts from pod container ports
+- Handles failover when leader pod becomes NotReady
 
-### Controller (`pkg/controller/`)
+**Key Functions:**
+- `Reconcile()` - Main reconciliation loop
+- `selectLeaderPod()` - Leader selection (sticky + oldest Ready)
+- `reconcileLeaderService()` - Create/update leader Service
+- `reconcileEndpointSlice()` - Create/update EndpointSlice
+- `resolveServicePorts()` - Resolve named targetPorts
 
-- **LeaderPolicyReconciler**: Main reconciliation logic
-  - Watches LeaderPolicy resources
-  - Finds candidates (pods with annotations)
-  - Monitors Lease resources
-  - Updates pod role annotations
-  - Updates LeaderPolicy status
+### Metrics (`pkg/metrics/metrics.go`)
 
-- **PodEventHandler**: Handles pod events
-  - Triggers reconciliation when pods with pool annotations change
+**Prometheus Metrics:**
+- `zen_lead_leader_duration_seconds` - Leader duration
+- `zen_lead_failover_count_total` - Failover count
+- `zen_lead_reconciliation_duration_seconds` - Reconciliation duration
+- `zen_lead_pods_available` - Ready pods count
+- `zen_lead_port_resolution_failures_total` - Port resolution failures
+- `zen_lead_reconciliation_errors_total` - Reconciliation errors
 
-### Election (`pkg/election/`)
+### Client SDK (`pkg/client/client.go`)
 
-- **Election**: Wrapper around client-go leaderelection
-  - Manages lease acquisition
-  - Handles callbacks (onStarted, onStopped)
-  - Provides IsLeader() check
+**Optional Feature:**
+- Simple query API: "Am I the leader?"
+- Uses Leases for leader status
+- Caching for performance
 
-### Pool (`pkg/pool/`)
+## Build Targets
 
-- **Manager**: Manages pools of candidates
-  - Finds pods participating in a pool
-  - Updates pod role annotations
-  - Helper functions for annotation management
+```bash
+make build          # Build binary
+make test           # Run tests
+make lint           # Run linter
+make docker-build   # Build Docker image
+```
 
-## Design Decisions
+## Deployment
 
-1. **Uses controller-runtime**: Standard Kubernetes operator pattern
-2. **Annotation-based**: Pods join pools via annotations (no code changes needed)
-3. **Lease-based**: Uses Kubernetes Lease API (coordination.k8s.io)
-4. **Status-driven**: LeaderPolicy status shows current leader and candidates
+**Helm Chart:**
+- `helm-charts/charts/zen-lead/` - Helm chart for deployment
+- Default: namespace-scoped, non-invasive, metrics enabled
 
+**Manifests:**
+- `deploy/deployment.yaml` - Controller deployment
+- `config/rbac/` - RBAC resources
+
+## Testing
+
+- **Unit Tests:** `pkg/*/*_test.go`
+- **Integration Tests:** `test/integration/`
+- **E2E Tests:** `test/e2e/` (future)
+
+## Documentation
+
+- **README.md** - Main documentation
+- **docs/ARCHITECTURE.md** - Architecture details
+- **docs/INTEGRATION.md** - Integration guide
+- **docs/TROUBLESHOOTING.md** - Troubleshooting
+- **docs/USE_CASES.md** - Use case examples

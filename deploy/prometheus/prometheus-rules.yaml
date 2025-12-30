@@ -1,0 +1,184 @@
+# Copyright 2025 Kube-ZEN Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: zen-lead-alerts
+  namespace: zen-lead-system
+  labels:
+    app.kubernetes.io/name: zen-lead
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: zen-lead.critical
+      interval: 30s
+      rules:
+        # Alert when zen-lead controller is down
+        - alert: ZenLeadControllerDown
+          expr: up{job="zen-lead"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: availability
+          annotations:
+            summary: "zen-lead Controller is down"
+            description: "zen-lead Controller has been down for more than 5 minutes. Leader election may not be working."
+            runbook_url: "https://github.com/kube-zen/zen-lead/docs/TROUBLESHOOTING.md"
+
+        # Alert when no pods available for leader selection
+        - alert: ZenLeadNoPodsAvailable
+          expr: zen_lead_pods_available == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: availability
+          annotations:
+            summary: "No pods available for leader selection"
+            description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} has no Ready pods available for leader selection."
+            runbook_url: "https://github.com/kube-zen/zen-lead/docs/TROUBLESHOOTING.md#no-pods-available"
+
+        # Alert when leader service has no endpoints
+        - alert: ZenLeadLeaderServiceWithoutEndpoints
+          expr: zen_lead_leader_service_without_endpoints == 1
+          for: 5m
+          labels:
+            severity: critical
+            component: availability
+          annotations:
+            summary: "Leader Service has no endpoints"
+            description: "Leader Service {{ $labels.service }}-leader in namespace {{ $labels.namespace }} has no endpoints. Traffic routing may be broken."
+            runbook_url: "https://github.com/kube-zen/zen-lead/docs/TROUBLESHOOTING.md#leader-service-has-no-endpoints"
+
+        # Alert on high failover rate (excessive leader changes)
+        - alert: ZenLeadHighFailoverRate
+          expr: rate(zen_lead_failover_count_total[5m]) > 0.1
+          for: 10m
+          labels:
+            severity: critical
+            component: stability
+          annotations:
+            summary: "High failover rate detected"
+            description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} is experiencing {{ $value }} failovers/sec. This indicates unstable leader election."
+            runbook_url: "https://github.com/kube-zen/zen-lead/docs/TROUBLESHOOTING.md#high-failover-rate"
+
+        # Alert on high reconciliation error rate
+        - alert: ZenLeadHighReconciliationErrorRate
+          expr: rate(zen_lead_reconciliation_errors_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: critical
+            component: reliability
+          annotations:
+            summary: "High reconciliation error rate"
+            description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} has {{ $value }} reconciliation errors/sec. Error type: {{ $labels.error_type }}"
+            runbook_url: "https://github.com/kube-zen/zen-lead/docs/TROUBLESHOOTING.md#reconciliation-errors"
+
+    - name: zen-lead.warning
+      interval: 30s
+      rules:
+        # Alert on slow reconciliation (P95 duration)
+        - alert: ZenLeadSlowReconciliation
+          expr: |
+            histogram_quantile(0.95,
+              rate(zen_lead_reconciliation_duration_seconds_bucket{result="success"}[5m])) > 2
+          for: 10m
+          labels:
+            severity: warning
+            component: performance
+          annotations:
+            summary: "Slow reconciliation detected"
+            description: "95th percentile reconciliation duration is {{ $value }}s for service {{ $labels.service }} in namespace {{ $labels.namespace }}. This may indicate controller performance issues."
+
+        # Alert on frequent port resolution failures
+        - alert: ZenLeadPortResolutionFailures
+          expr: rate(zen_lead_port_resolution_failures_total[10m]) > 0.01
+          for: 10m
+          labels:
+            severity: warning
+            component: configuration
+          annotations:
+            summary: "Port resolution failures detected"
+            description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} has port resolution failures for port {{ $labels.port_name }}. Check that container port names match Service targetPort names."
+
+        # Alert on low pod availability
+        - alert: ZenLeadLowPodAvailability
+          expr: zen_lead_pods_available < 2
+          for: 5m
+          labels:
+            severity: warning
+            component: availability
+          annotations:
+            summary: "Low pod availability"
+            description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} has only {{ $value }} Ready pod(s). Consider scaling up for high availability."
+
+        # Alert on leader pod age (very old leader may indicate issues)
+        - alert: ZenLeadLeaderPodAgeHigh
+          expr: zen_lead_leader_pod_age_seconds > 86400
+          for: 1h
+          labels:
+            severity: warning
+            component: stability
+          annotations:
+            summary: "Leader pod is very old"
+            description: "Leader pod {{ $labels.pod }} for service {{ $labels.service }} in namespace {{ $labels.namespace }} has been leader for {{ $value }}s ({{ $value | humanizeDuration }}). This may indicate lack of pod rotation."
+
+        # Alert on high reconciliation rate (may indicate thrashing)
+        - alert: ZenLeadHighReconciliationRate
+          expr: rate(zen_lead_reconciliations_total[5m]) > 10
+          for: 5m
+          labels:
+            severity: warning
+            component: performance
+          annotations:
+            summary: "High reconciliation rate"
+            description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} is experiencing {{ $value }} reconciliations/sec. This may indicate controller thrashing."
+
+        # Alert on high sticky leader miss rate (indicates frequent leader changes)
+        - alert: ZenLeadHighStickyLeaderMissRate
+          expr: |
+            rate(zen_lead_sticky_leader_misses_total[5m]) /
+            (rate(zen_lead_sticky_leader_hits_total[5m]) + rate(zen_lead_sticky_leader_misses_total[5m])) > 0.2
+          for: 10m
+          labels:
+            severity: warning
+            component: stability
+          annotations:
+            summary: "High sticky leader miss rate"
+            description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} has {{ $value | humanizePercentage }} sticky leader miss rate. Leaders are changing frequently."
+
+    - name: zen-lead.info
+      interval: 1m
+      rules:
+        # Info alert on failover (for tracking)
+        - alert: ZenLeadFailoverOccurred
+          expr: increase(zen_lead_failover_count_total[1m]) > 0
+          labels:
+            severity: info
+            component: stability
+          annotations:
+            summary: "Leader failover occurred"
+            description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} experienced a leader failover."
+
+        # Info alert on port resolution failure (first occurrence)
+        - alert: ZenLeadPortResolutionFailureInfo
+          expr: increase(zen_lead_port_resolution_failures_total[1m]) > 0
+          labels:
+            severity: info
+            component: configuration
+          annotations:
+            summary: "Port resolution failure occurred"
+            description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} had a port resolution failure for port {{ $labels.port_name }}."
+

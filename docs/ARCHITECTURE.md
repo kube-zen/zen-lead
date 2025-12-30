@@ -2,252 +2,228 @@
 
 ## Overview
 
-Zen-Lead provides a standardized High Availability (HA) solution for Kubernetes workloads. Instead of requiring developers to implement leader election code, they simply annotate their Deployments.
+Zen-Lead provides network-level single-active routing for Kubernetes workloads without requiring application code changes or mutating workload pods. It uses a **Service-annotation opt-in** approach that is completely non-invasive.
 
 ## Core Concepts
 
-### LeaderPolicy
+### Service Annotation Opt-In
 
-A `LeaderPolicy` CRD defines a pool (group) of replicas that participate in leader election.
+Services opt into zen-lead by adding the annotation:
 
-**Key Fields:**
-- `spec.leaseDurationSeconds`: How long a leader holds the lease (default: 15s)
-- `spec.identityStrategy`: How pod identity is derived ("pod" or "custom")
-- `spec.followerMode`: What followers do ("standby" or "scaleDown")
-- `status.currentHolder`: Current leader information
-- `status.candidates`: Number of pods in the pool
+```yaml
+metadata:
+  annotations:
+    zen-lead.io/enabled: "true"
+```
 
-### Pod Annotations
+### Selector-Less Leader Service
 
-Pods participate in leader election via annotations:
+For each opted-in Service `S`, zen-lead creates a selector-less Service `S-leader`:
 
-- `zen-lead/pool`: Name of the LeaderPolicy to join
-- `zen-lead/join`: Set to "true" to participate
-- `zen-lead/role`: Automatically set by zen-lead ("leader" or "follower")
+- `spec.selector: null` - No selector, endpoints managed manually
+- Ports mirrored from source Service `S`
+- Labels: `app.kubernetes.io/managed-by: zen-lead`, `zen-lead.io/source-service: S`
+- Owner reference to source Service `S` (for garbage collection)
 
-### Lease Resource
+### Managed EndpointSlice
 
-Zen-Lead uses Kubernetes `Lease` resources (coordination.k8s.io) for leader election. The Lease is created with the same name as the LeaderPolicy.
+Zen-lead creates and manages a single EndpointSlice for `S-leader`:
+
+- Label: `kubernetes.io/service-name: S-leader`
+- Label: `endpointslice.kubernetes.io/managed-by: zen-lead`
+- Exactly one endpoint pointing to the current leader pod
+- Owner reference to `S-leader` Service
+
+### Leader Selection
+
+**Algorithm (deterministic + low churn):**
+
+1. **Sticky Leader (default):** If current leader (from EndpointSlice targetRef) is still Ready → keep it
+2. **Fallback:** Choose oldest Ready pod (tie-breaker: lexical pod name)
+3. **No Candidates:** If zero Ready pods → EndpointSlice endpoints empty (clean failure mode)
+
+**Candidates:** Pods matching `S.spec.selector` in the same namespace
 
 ## Architecture Flow
 
 ```
-1. User creates LeaderPolicy
-   └─> zen-lead controller watches for LeaderPolicy
+1. User annotates Service with zen-lead.io/enabled: "true"
+   └─> ServiceDirectorReconciler watches for Service changes
 
-2. User annotates Deployment pods
-   └─> zen-lead controller detects pods with zen-lead/pool annotation
+2. Controller finds pods matching Service selector
+   └─> Lists pods in same namespace with matching labels
 
-3. Controller finds candidates
-   └─> Lists all pods with matching pool annotation
+3. Controller selects leader pod
+   └─> Sticky: keep current if Ready, else oldest Ready pod
 
-4. Controller monitors Lease
-   └─> Reads Lease resource to determine current leader
+4. Controller creates/updates selector-less leader Service
+   └─> Mirrors ports from source Service
 
-5. Controller updates pod annotations
-   └─> Sets zen-lead/role: leader or follower
+5. Controller creates/updates EndpointSlice
+   └─> Points to leader pod IP with resolved ports
 
-6. Controller updates LeaderPolicy status
-   └─> Shows current leader, phase, candidates count
+6. Traffic routes to leader pod
+   └─> Applications connect to <service>-leader
 ```
 
 ## Components
 
-### LeaderPolicy Controller
+### ServiceDirectorReconciler
 
 **Responsibilities:**
-- Reconciles LeaderPolicy resources
-- Finds candidate pods
-- Monitors Lease resources
-- Updates pod role annotations
-- Updates LeaderPolicy status
+- Watches `corev1.Service` resources
+- Detects `zen-lead.io/enabled: "true"` annotation
+- Creates/updates selector-less leader Service
+- Creates/updates EndpointSlice pointing to leader pod
+- Resolves named targetPorts from pod container ports
+- Handles failover when leader pod becomes NotReady
 
 **Reconciliation Loop:**
-1. Fetch LeaderPolicy
-2. Find all candidate pods (with pool annotation)
-3. Get Lease resource
-4. Determine current leader from Lease
-5. Update pod role annotations
-6. Update LeaderPolicy status
-7. Requeue after 5 seconds
+1. Fetch Service
+2. Check for `zen-lead.io/enabled: "true"` annotation
+3. Validate Service has selector
+4. List pods matching selector
+5. Select leader pod (sticky + oldest Ready)
+6. Resolve Service ports (handle named targetPort)
+7. Reconcile leader Service (create/update)
+8. Reconcile EndpointSlice (create/update)
+9. Record metrics
 
-### Pod Event Handler
+**Event-Driven:**
+- Service changes → reconcile that Service
+- Pod changes → find matching Services and reconcile
+- EndpointSlice changes → reconcile source Service (drift detection)
 
-**Responsibilities:**
-- Watches Pod resources
-- Triggers reconciliation when pods with pool annotations change
+### Port Resolution
 
-**Events Handled:**
-- Pod created with pool annotation
-- Pod updated with pool annotation
-- Pod deleted with pool annotation
+**Problem:** Service `targetPort` may be named, but EndpointSlice needs numeric port.
 
-### Election Wrapper
-
-**Responsibilities:**
-- Wraps client-go leaderelection library
-- Manages lease acquisition
-- Handles callbacks
-
-**Note:** Currently used for reference. In future, pods could use this directly to participate in election.
-
-### Pool Manager
-
-**Responsibilities:**
-- Finds pods participating in a pool
-- Updates pod role annotations
-- Helper functions for annotation management
-
-## Leader Election Mechanism
-
-### Standard Kubernetes Pattern
-
-Zen-Lead uses the standard Kubernetes leader election pattern:
-
-1. **Lease Resource**: Created in the same namespace as the LeaderPolicy
-2. **Lease Duration**: How long a leader holds the lease (default: 15s)
-3. **Renew Deadline**: Time to renew before losing leadership (default: 10s)
-4. **Retry Period**: How often to retry acquiring leadership (default: 2s)
-
-### Identity Strategy
-
-**Pod Strategy (default):**
-- Uses Pod Name + UID
-- Format: `pod-name-uid` or `pod-name-timestamp`
-
-**Custom Strategy:**
-- Uses annotation value from `zen-lead/identity`
-- Requires `ZEN_LEAD_IDENTITY` environment variable
-
-### Follower Mode
-
-**Standby (default):**
-- Pods stay running
-- Marked with `zen-lead/role: follower`
-- Applications can check annotation to know if they're leader
-
-**ScaleDown (future):**
-- Pods scale to 0 for followers
-- Requires HPA integration
-- Advanced feature for Phase 2
-
-## Status API
-
-### LeaderPolicy Status
-
-```yaml
-status:
-  phase: Stable  # Electing or Stable
-  currentHolder:
-    name: my-pod-123
-    uid: 5d4b123-c4f5-1234-5678
-    startTime: "2025-12-28T10:00:00Z"
-  candidates: 3
-  conditions:
-    - type: LeaderElected
-      status: "True"
-    - type: CandidatesAvailable
-      status: "True"
-```
-
-### Querying Status
-
-```bash
-# Get current leader
-kubectl get leaderpolicy my-pool -o jsonpath='{.status.currentHolder.name}'
-
-# Get number of candidates
-kubectl get leaderpolicy my-pool -o jsonpath='{.status.candidates}'
-
-# Get phase
-kubectl get leaderpolicy my-pool -o jsonpath='{.status.phase}'
-```
-
-## Integration Patterns
-
-### Pattern 1: Annotation-Based (Recommended)
-
-**Use Case:** Any workload (Deployment, StatefulSet, CronJob)
-
-**Steps:**
-1. Create LeaderPolicy
-2. Annotate pods with `zen-lead/pool` and `zen-lead/join: "true"`
-3. Application checks `zen-lead/role` annotation to know if it's leader
+**Solution:**
+1. For each ServicePort:
+   - If `targetPort` is int → use that int
+   - If `targetPort` is name → resolve from leader pod container ports
+   - If unresolved → fallback to ServicePort.port and emit Warning Event
 
 **Example:**
 ```yaml
-annotations:
-  zen-lead/pool: my-pool
-  zen-lead/join: "true"
+# Service
+ports:
+- port: 80
+  targetPort: http  # Named port
+
+# Pod
+ports:
+- containerPort: 8080
+  name: http  # Matches targetPort name
+
+# EndpointSlice (resolved)
+ports:
+- port: 8080  # Resolved from container port name
 ```
 
-### Pattern 2: Status Query (Future)
+### Leader Selection Strategy
 
-**Use Case:** External applications querying leader status
+**Sticky Leader (default):**
+- Keeps current leader if still Ready
+- Reduces churn and unnecessary failovers
+- Disabled via `zen-lead.io/sticky: "false"`
 
-**Steps:**
-1. Query LeaderPolicy status via Kubernetes API
-2. Check if current pod is the leader
-3. Act accordingly
+**Oldest Ready Pod:**
+- Selects pod with oldest `creationTimestamp`
+- Tie-breaker: lexical pod name
+- Ensures deterministic selection
 
-## Security
+**No Ready Pods:**
+- EndpointSlice has zero endpoints
+- Leader Service exists but routes nowhere
+- Clean failure mode (no errors)
 
-### RBAC Requirements
+## Ownership & Cleanup
 
-Zen-Lead requires the following permissions:
+**Ownership Chain:**
+```
+Source Service (S)
+  └─> Leader Service (S-leader) [ownerRef → S]
+        └─> EndpointSlice [ownerRef → S-leader]
+```
+
+**Cleanup Behavior:**
+- Remove `zen-lead.io/enabled` annotation → Leader Service deleted → EndpointSlice deleted (GC)
+- Delete source Service → Leader Service deleted → EndpointSlice deleted (GC)
+- Controller-side safety cleanup for stale resources (label-based sweep)
+
+## RBAC Requirements
+
+**Minimum Permissions (day-0):**
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 rules:
-- apiGroups: ["coordination.kube-zen.io"]
-  resources: ["leaderpolicies"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
-- apiGroups: ["coordination.k8s.io"]
-  resources: ["leases"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list", "watch", "update", "patch"]
+  verbs: ["get", "list", "watch"]  # Read-only
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
 ```
+
+**No Permissions For:**
+- `pods/patch` or `pods/update` (no pod mutation)
+- `coordination.k8s.io/leases` (not used)
+- `coordination.kube-zen.io/leaderpolicies` (not used)
 
 ## Performance Considerations
 
 ### Reconciliation Frequency
 
-- Default: Every 5 seconds
-- Adjustable via RequeueAfter in controller
-- Pod events trigger immediate reconciliation
-
-### Lease Renewal
-
-- Standard Kubernetes defaults (15s/10s/2s)
-- Configurable per LeaderPolicy
-- Appropriate for most use cases
+- **Event-Driven:** Reconciliation triggered by Service/Pod/EndpointSlice changes
+- **No Polling:** Controller doesn't poll, only reacts to events
+- **Fast Failover:** Bounded by readiness transition + controller reconcile + kube-proxy update (~2-5 seconds)
 
 ### Resource Usage
 
-- Minimal overhead (just lease updates and status updates)
-- No additional goroutines beyond controller-runtime
-- Scales with number of LeaderPolicies and candidates
+- **Minimal Overhead:** Just Service and EndpointSlice management
+- **Scales Linearly:** With number of opted-in Services
+- **No Additional Goroutines:** Beyond controller-runtime defaults
 
-## Future Enhancements
+## Limitations
 
-### Phase 2: Follower ScaleDown
+### Network-Level Only
 
-- Integrate with HPA
-- Scale followers to 0
-- Save resources
+Zen-Lead provides **network-level single-active routing**. It does NOT:
+- Guarantee application-level correctness
+- Provide distributed consensus
+- Handle application state coordination
+- Prevent split-brain at application level
 
-### Phase 3: Distributed Locking
+**Use Case:** Suitable for stateless applications or applications that handle their own state coordination.
 
-- ManualLock CRD
-- Acquire/release locks
-- Prevent parallel execution
+### Failover Latency
 
-### Phase 4: gRPC/HTTP Status API
+Failover is bounded by:
+- Pod readiness transition latency
+- Controller reconciliation latency (~1-2 seconds)
+- kube-proxy EndpointSlice update latency (~1-2 seconds)
 
-- Query leader status via API
-- No need to query Kubernetes API
-- Better for external integrations
+**Total:** Typically 2-5 seconds for complete failover.
 
+## Security
+
+### Non-Invasive Design
+
+- **No Pod Mutation:** Controller never patches or updates pods
+- **Read-Only Pod Access:** Controller only reads pod status
+- **Least-Privilege RBAC:** Minimal permissions required
+
+### Resource Isolation
+
+- **Ownership:** All generated resources owned by source Service
+- **Labels:** Clear labeling for identification (`app.kubernetes.io/managed-by: zen-lead`)
+- **Garbage Collection:** Automatic cleanup via owner references

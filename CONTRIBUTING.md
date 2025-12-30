@@ -9,7 +9,7 @@ Thank you for your interest in contributing to Zen-Lead!
 - Go 1.24+
 - Kubernetes cluster (k3d, kind, or minikube)
 - kubectl
-- controller-gen (for CRD generation)
+- Helm 3.0+ (for testing)
 
 ### Getting Started
 
@@ -24,22 +24,12 @@ Thank you for your interest in contributing to Zen-Lead!
    go mod download
    ```
 
-3. **Install controller-gen:**
-   ```bash
-   go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
-   ```
-
-4. **Generate CRDs:**
-   ```bash
-   make generate
-   ```
-
-5. **Build:**
+3. **Build:**
    ```bash
    make build
    ```
 
-6. **Run tests:**
+4. **Run tests:**
    ```bash
    make test
    ```
@@ -48,105 +38,89 @@ Thank you for your interest in contributing to Zen-Lead!
 
 ### Making Changes
 
-1. Create a feature branch:
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
+1. Create a feature branch from `main`
 2. Make your changes
+3. Run tests: `make test`
+4. Run linter: `make lint`
+5. Build: `make build`
+6. Submit a pull request
 
-3. Run tests and linters:
-   ```bash
-   make all
-   ```
+### Code Style
 
-4. Commit your changes:
-   ```bash
-   git commit -m "feat: your feature description"
-   ```
+- Follow Go standard formatting (`go fmt`)
+- Use `golangci-lint` for linting
+- Write tests for new functionality
+- Update documentation for user-facing changes
 
-5. Push and create a PR
+### Testing
 
-### Code Standards
+- Unit tests: `go test ./pkg/...`
+- Integration tests: `go test ./test/integration/...`
+- E2E tests: See `test/e2e/` directory
 
-- **Go Format:** Use `gofmt` (enforced by `make fmt`)
-- **Go Vet:** Use `go vet` (enforced by `make vet`)
-- **Tests:** Write tests for new features
-- **Documentation:** Update docs for user-facing changes
+## Architecture
 
-### Project Structure
+Zen-Lead uses a **Service-annotation opt-in** approach:
 
-- `cmd/manager/` - Main application entry point
-- `pkg/apis/` - CRD type definitions
-- `pkg/controller/` - Controller logic
-- `pkg/election/` - Leader election wrapper
-- `pkg/pool/` - Pool management
-- `config/` - RBAC and CRD manifests
-- `deploy/` - Deployment manifests
-- `examples/` - Example configurations
-- `docs/` - Documentation
+- Services opt-in via `zen-lead.io/enabled: "true"` annotation
+- Controller creates selector-less `<service>-leader` Service
+- Controller creates EndpointSlice pointing to leader pod
+- No CRDs required, no pod mutation
 
-## Testing
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture information.
 
-### Unit Tests
+## Project Structure
 
-```bash
-go test ./pkg/...
+```
+zen-lead/
+├── cmd/
+│   └── manager/              # Main controller binary
+│       └── main.go           # Entry point
+│
+├── pkg/
+│   ├── director/            # Service director (core controller)
+│   │   ├── service_director.go
+│   │   └── strategy.go
+│   │
+│   ├── metrics/             # Prometheus metrics
+│   │   └── metrics.go
+│   │
+│   │   └── zenlead_validator.go
+│   │
+│   └── client/              # Client SDK (optional)
+│       └── client.go
+│
+├── config/
+│   └── rbac/                # RBAC manifests
+│
+├── deploy/                  # Deployment manifests
+│   ├── prometheus/          # Prometheus alert rules
+│   └── grafana/             # Grafana dashboard
+│
+├── examples/                # Example configurations
+│
+├── docs/                    # Documentation
+│
+└── test/                    # Tests
 ```
 
-### Integration Tests
+## Key Principles
 
-```bash
-# Requires a Kubernetes cluster
-go test ./test/integration/...
-```
+1. **Non-Invasive:** No pod mutation, no changes to user resources
+2. **Service-First:** Opt-in via Service annotation
+3. **Zero CRDs:** No CRDs required for day-0 usage
+4. **Least-Privilege:** Minimal RBAC permissions
 
-### E2E Tests
+## Pull Request Process
 
-```bash
-# Requires a Kubernetes cluster
-make test-e2e
-```
-
-## Adding New Features
-
-### Adding a New CRD Field
-
-1. Update `pkg/apis/coordination.kube-zen.io/v1alpha1/leaderpolicy_types.go`
-2. Add kubebuilder markers for validation
-3. Regenerate CRDs: `make generate`
-4. Update controller logic if needed
-5. Add tests
-6. Update documentation
-
-### Adding a New Follower Mode
-
-1. Add enum value to `FollowerMode` field
-2. Implement logic in controller
-3. Add tests
-4. Update documentation
-
-## Documentation
-
-- Update `README.md` for user-facing changes
-- Update `docs/` for detailed documentation
-- Add examples to `examples/`
-- Update `CHANGELOG.md` for releases
-
-## Release Process
-
-1. Update version in `go.mod` and `CHANGELOG.md`
-2. Create git tag
-3. Build and push Docker image
-4. Update Helm chart (if applicable)
+1. Update documentation if needed
+2. Add tests for new functionality
+3. Ensure all tests pass
+4. Update CHANGELOG.md if applicable
+5. Submit PR with clear description
 
 ## Questions?
 
-- Open an issue for bugs or feature requests
-- Check existing documentation in `docs/`
-- Review examples in `examples/`
-
----
-
-Thank you for contributing to Zen-Lead! 🚀
-
+- Check [README.md](README.md) for overview
+- See [docs/](docs/) for detailed documentation
+- Open an issue for questions or discussions

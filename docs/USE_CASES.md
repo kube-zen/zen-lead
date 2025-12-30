@@ -1,325 +1,270 @@
 # Zen-Lead Use Cases
 
-## Use Case 1: Controller High Availability
+## Use Case 1: Stateless Controller High Availability
 
 ### Problem
 
-Your Kubernetes controller runs multiple replicas for high availability, but they all try to reconcile the same resources, causing:
-- Duplicate work
+Your Kubernetes controller runs multiple replicas for high availability, but you want to ensure only one replica actively processes work to avoid:
+- Duplicate processing
 - Race conditions
 - Resource conflicts
 
 ### Solution
 
-Use zen-lead to ensure only one replica actively reconciles.
+Use zen-lead to route traffic to only the leader replica.
 
 ### Configuration
 
 ```yaml
-# 1. Create LeaderPolicy
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
-metadata:
-  name: my-controller-pool
-spec:
-  leaseDurationSeconds: 15
-  identityStrategy: pod
-  followerMode: standby
-
----
-# 2. Annotate Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: my-controller
 spec:
   replicas: 3
+  selector:
+    matchLabels:
+      app: my-controller
   template:
     metadata:
-      annotations:
-        zen-lead/pool: my-controller-pool
-        zen-lead/join: "true"
+      labels:
+        app: my-controller
+    spec:
+      containers:
+      - name: controller
+        image: my-controller:latest
+        env:
+        - name: SERVICE_NAME
+          value: my-controller-leader  # Use leader service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-controller
+  annotations:
+    zen-lead.io/enabled: "true"
+spec:
+  selector:
+    app: my-controller
+  ports:
+  - port: 8080
+    targetPort: 8080
 ```
 
-### Application Code
+### How It Works
 
-```go
-// Check if this pod is the leader
-func isLeader() bool {
-    podName := os.Getenv("POD_NAME")
-    // Query pod annotation or LeaderPolicy status
-    // Only leader processes reconciliations
-    return checkLeaderStatus(podName)
-}
-```
-
-### Benefits
-
-- ✅ Only 1 replica processes reconciliations
-- ✅ Automatic failover if leader crashes
-- ✅ Other replicas ready for immediate takeover
-- ✅ No code changes required (annotation-based)
+1. Controller connects to `my-controller-leader` Service
+2. Only leader pod receives traffic
+3. On leader failure, traffic automatically switches to new leader
+4. No application code changes required
 
 ---
 
-## Use Case 2: Exclusive CronJob Execution
+## Use Case 2: API Gateway Single-Active
 
 ### Problem
 
-You have a CronJob that runs a daily report. If it runs on 3 nodes, it sends 3 duplicate emails.
+You have an API gateway with multiple replicas, but you want only one to handle certain operations (e.g., rate limiting, caching).
 
 ### Solution
 
-Use zen-lead to ensure only one cluster instance executes, even with multiple nodes.
+Use zen-lead to route admin/control traffic to leader, while keeping regular traffic load-balanced.
 
 ### Configuration
 
 ```yaml
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
+apiVersion: v1
+kind: Service
 metadata:
-  name: report-generator
+  name: api-gateway
+  annotations:
+    zen-lead.io/enabled: "true"
 spec:
-  leaseDurationSeconds: 15
-  identityStrategy: pod
-  followerMode: standby
+  selector:
+    app: api-gateway
+  ports:
+  - name: admin
+    port: 9090
+    targetPort: admin
+  - name: http
+    port: 80
+    targetPort: http
+---
+# Regular traffic (load-balanced)
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway-public
+spec:
+  selector:
+    app: api-gateway
+  ports:
+  - port: 80
+    targetPort: http
+```
+
+### Application Logic
+
+```go
+// Application checks if it's receiving admin traffic
+if isAdminRequest(req) {
+    // Only leader handles admin requests
+    // Other replicas return 503 or redirect
+}
+```
 
 ---
+
+## Use Case 3: Scheduled Job Coordinator
+
+### Problem
+
+You have a CronJob that should only run on one replica to avoid duplicate execution.
+
+### Solution
+
+Use zen-lead with a Service that selects CronJob pods.
+
+### Configuration
+
+```yaml
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: daily-report
-  annotations:
-    zen-lead/pool: report-generator
-    zen-lead/join: "true"
+  name: report-generator
 spec:
-  schedule: "0 0 * * *"  # Daily at midnight
+  schedule: "0 0 * * *"
   jobTemplate:
     spec:
       template:
         metadata:
-          annotations:
-            zen-lead/pool: report-generator
-            zen-lead/join: "true"
+          labels:
+            app: report-generator
         spec:
           containers:
-          - name: report-generator
+          - name: generator
             image: report-generator:latest
-            # Only the leader pod will execute
+            env:
+            - name: SERVICE_NAME
+              value: report-generator-leader
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: report-generator
+  annotations:
+    zen-lead.io/enabled: "true"
+spec:
+  selector:
+    app: report-generator
+  ports:
+  - port: 8080
+    targetPort: 8080
 ```
 
-### Benefits
-
-- ✅ Only 1 instance executes globally
-- ✅ Works across multiple nodes
-- ✅ No duplicate reports
-- ✅ Automatic failover
+**Note:** This works for Job pods, but CronJob scheduling still creates multiple Jobs. Consider using a controller pattern instead.
 
 ---
 
-## Use Case 3: Distributed Locking
+## Use Case 4: Database Connection Pool Manager
 
 ### Problem
 
-A processing job needs to write to a shared S3 bucket. If two pods run simultaneously, they corrupt the file.
+You have a connection pool manager that should only run on one replica to avoid connection pool conflicts.
 
 ### Solution
 
-Use zen-lead to acquire a lock before critical operations.
+Use zen-lead to route traffic to leader replica.
 
 ### Configuration
 
 ```yaml
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: s3-writer-lock
+  name: pool-manager
 spec:
-  leaseDurationSeconds: 60  # Longer lease for operations
-  identityStrategy: pod
-  followerMode: standby
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: pool-manager
+    spec:
+      containers:
+      - name: manager
+        image: pool-manager:latest
+        env:
+        - name: POOL_SERVICE
+          value: pool-manager-leader
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pool-manager
+  annotations:
+    zen-lead.io/enabled: "true"
+spec:
+  selector:
+    app: pool-manager
 ```
-
-### Application Code
-
-```go
-func writeToS3() error {
-    // Check if this pod is the leader
-    if !isLeader() {
-        return fmt.Errorf("not the leader, skipping")
-    }
-    
-    // Only leader writes to S3
-    return s3Client.PutObject(...)
-}
-```
-
-### Benefits
-
-- ✅ Prevents parallel writes
-- ✅ Ensures data consistency
-- ✅ Simple lock mechanism
-- ✅ Automatic lock release on pod termination
 
 ---
 
-## Use Case 4: Primary/Secondary Pattern
+## Use Case 5: Metrics Aggregator
 
 ### Problem
 
-You want a primary instance handling all traffic, with secondary instances ready for failover.
+You have a metrics aggregator that should only run on one replica to avoid duplicate aggregation.
 
 ### Solution
 
-Use zen-lead with follower mode to keep secondaries in standby.
+Use zen-lead to route metrics collection traffic to leader.
 
 ### Configuration
 
 ```yaml
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
+apiVersion: v1
+kind: Service
 metadata:
-  name: primary-service
+  name: metrics-aggregator
+  annotations:
+    zen-lead.io/enabled: "true"
 spec:
-  leaseDurationSeconds: 15
-  identityStrategy: pod
-  followerMode: standby  # Secondaries stay running
+  selector:
+    app: metrics-aggregator
+  ports:
+  - port: 9090
+    targetPort: metrics
+    name: metrics
 ```
-
-### Application Code
-
-```go
-func handleRequest(w http.ResponseWriter, r *http.Request) {
-    if !isLeader() {
-        // Follower: redirect or return 503
-        http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
-        return
-    }
-    
-    // Leader: handle request
-    processRequest(w, r)
-}
-```
-
-### Benefits
-
-- ✅ Primary handles all traffic
-- ✅ Secondaries ready for instant failover
-- ✅ No load balancer configuration needed
-- ✅ Automatic failover
 
 ---
 
-## Use Case 5: Resource-Intensive Operations
+## Important Notes
 
-### Problem
+### What Zen-Lead Does NOT Do
 
-You have a resource-intensive operation that should only run on one pod to save resources.
+- **Application-Level Coordination:** Zen-lead provides network routing only. Applications must handle their own state coordination.
+- **Distributed Consensus:** Not suitable for applications requiring strong consistency guarantees.
+- **State Management:** Does not manage application state or prevent split-brain at application level.
 
-### Solution
+### When to Use Zen-Lead
 
-Use zen-lead to ensure only the leader performs expensive operations.
+✅ **Good For:**
+- Stateless applications
+- Applications with their own state coordination
+- Network-level single-active routing
+- Zero-code-change requirements
 
-### Configuration
+❌ **Not Suitable For:**
+- Applications requiring distributed consensus
+- Stateful applications without coordination
+- Applications requiring guaranteed exactly-once semantics
 
-```yaml
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
-metadata:
-  name: expensive-operation
-spec:
-  leaseDurationSeconds: 15
-  identityStrategy: pod
-  followerMode: standby
-```
+### Best Practices
 
-### Application Code
-
-```go
-func performExpensiveOperation() {
-    if !isLeader() {
-        log.Info("Not leader, skipping expensive operation")
-        return
-    }
-    
-    // Only leader performs expensive operation
-    expensiveOperation()
-}
-```
-
-### Benefits
-
-- ✅ Saves resources (CPU, memory)
-- ✅ Prevents duplicate work
-- ✅ Automatic failover
-- ✅ Simple configuration
-
----
-
-## Use Case 6: Integration with Zen Suite
-
-### zen-flow Integration
-
-**Problem:** Multiple zen-flow replicas try to create the same Job.
-
-**Solution:**
-```yaml
-annotations:
-  zen-lead/pool: flow-controller
-  zen-lead/join: "true"
-```
-
-**Result:** Only 1 replica actively reconciles JobFlows.
-
-### zen-watcher Integration
-
-**Problem:** Multiple zen-watcher replicas write duplicate Observations.
-
-**Solution:**
-```yaml
-annotations:
-  zen-lead/pool: watcher-primary
-  zen-lead/join: "true"
-```
-
-**Result:** Only 1 replica writes to Observation CRDs.
-
-### zen-lock Integration
-
-**Problem:** Multiple zen-lock webhooks handle the same requests.
-
-**Solution:**
-```yaml
-annotations:
-  zen-lead/pool: lock-webhook
-  zen-lead/join: "true"
-```
-
-**Result:** Only leader handles webhook traffic (or use scaleDown mode to save resources).
-
----
-
-## Best Practices
-
-1. **Use Descriptive Pool Names**
-   - `flow-controller` not `pool1`
-   - `watcher-primary` not `test`
-
-2. **Set Appropriate Lease Duration**
-   - Fast failover: 10s
-   - Stable workloads: 15s (default)
-   - Long operations: 30s+
-
-3. **Monitor Leader Transitions**
-   - Alert on frequent changes
-   - Track transition metrics
-
-4. **Use Standby Mode for Most Cases**
-   - Keeps replicas ready
-   - Instant failover
-   - Only use scaleDown if resource savings needed
-
----
-
-**See [INTEGRATION.md](INTEGRATION.md) for detailed integration examples.**
-
+1. **Readiness Probes:** Ensure pods have accurate readiness probes
+2. **Health Checks:** Monitor leader service endpoints
+3. **Failover Testing:** Regularly test failover scenarios
+4. **Metrics:** Monitor failover rate and reconciliation duration
+5. **Resource Limits:** Set appropriate limits to prevent evictions

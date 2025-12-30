@@ -1,223 +1,98 @@
 # Zen-Lead
 
-**Universal High Availability for Kubernetes - Zero Friction, Zero Code Changes**
+**Network-Level Single-Active Routing for Kubernetes - Zero Code Changes**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 
-> **"Set it and forget it. HA just works."**
+> **"Annotate a Service → zen-lead creates `<svc>-leader` selector-less Service + EndpointSlice"**
 
-Zen-Lead is a **universal High Availability controller** for Kubernetes that provides automatic leader election and traffic routing. It works with **any** Kubernetes workload—Deployments, StatefulSets, Jobs, CronJobs—without requiring code changes.
+Zen-Lead is a **non-invasive leader election controller** for Kubernetes that provides network-level single-active routing without requiring application code changes or mutating workload pods.
 
-## 🎯 The "Grand Unification" Philosophy
+## 🎯 What Zen-Lead Does
 
-**Zero-Opinionated HA**: If you install zen-lead, you want HA. zen-lead automatically detects your workload type and applies the correct strategy.
+Zen-Lead watches Services with the `zen-lead.io/enabled: "true"` annotation and automatically:
+- Creates a selector-less `<service-name>-leader` Service
+- Creates an EndpointSlice pointing to exactly one Ready pod (the leader)
+- Updates the EndpointSlice when the leader changes (automatic failover)
+- Cleans up when the annotation is removed
 
-- **Traffic Director**: For Deployments/Services—routes traffic to leader pod via Service selector
-- **Gatekeeper Pattern**: For Deployments—actively blocks non-leader Pod creation at the API level
-- **State Guard**: For Jobs/CronJobs—ensures only leader executes logic
-- **Smart Defaults**: If replicas > 1, HA is automatically enabled
-- **Auto-Detection**: Automatically detects workload Kind and applies correct policy
+**Your application:** Just connect to `<service-name>-leader` instead of `<service-name>`. That's it.
 
-**No configuration needed. No code changes. Just add one label and scale your replicas.**
+## ✨ Key Features
+
+- ✅ **Zero Code Changes**: Applications don't need to know about leader election
+- ✅ **Non-Invasive**: No pod mutation, no changes to user resources
+- ✅ **Service-First Opt-In**: Annotate any Service with `zen-lead.io/enabled: "true"`
+- ✅ **Automatic Failover**: Controller-driven leader selection based on pod readiness
+- ✅ **Production-Ready**: Secure defaults, namespace-scoped, event-driven reconciliation
+- ✅ **Small Footprint**: No sidecars, minimal RBAC, K8s-native primitives only
+- ✅ **Safe-by-Default**: Fail-closed port resolution, no pod mutation, HA controller with mandatory leader election
 
 ## 🚀 Quick Start
 
-### Installation
-
-```bash
-# Install zen-lead (one-time, cluster-wide)
-helm install zen-lead zen-lead/zen-lead \
-  --namespace zen-lead-system \
-  --create-namespace
-```
-
-### Auto-Discovery: How It Works
-
-**Step 1:** Create a LeaderPolicy (defines a pool)
-
-```yaml
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
-metadata:
-  name: zen-flow-pool
-  namespace: zen-flow-system
-spec:
-  leaseDurationSeconds: 15
-```
-
-**Step 2:** Add one label to your Deployment
+### Step 1: Deploy Your Application
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: zen-flow-controller
-  namespace: zen-flow-system
-  labels:
-    zen-lead/pool: zen-flow-pool  # Add this label
+  name: my-app
 spec:
-  replicas: 3  # Scale to 3 for HA
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: app
+        image: my-app:latest
+        ports:
+        - containerPort: 8080
+          name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+spec:
+  selector:
+    app: my-app
+  ports:
+  - port: 80
+    targetPort: 8080
+    name: http
 ```
 
-**That's it!** zen-lead automatically:
-- **Auto-detects** workload Kind (Deployment → TrafficDirector, Job → StateGuard)
-- **Gatekeeper Mode**: Blocks non-leader Pod creation at the API level (Validating Admission Webhook)
-- **Traffic Director**: Creates a Service (`zen-flow-pool-director`) that routes traffic to the leader
-- **Labels**: Labels the leader pod (`zen-lead/role: leader`)
-- **Self-Healing**: Updates Service selector when leader changes
-
-**Your application:** 
-- **Zero code changes** - zen-lead blocks non-leaders at the API level
-- **Zero configuration** - Just add the label and scale replicas
-- **HA-unaware** - Your app doesn't need to know about leader election
-
-**Result:** Only the leader Pod is created. Followers are blocked by zen-lead's webhook. Your application runs normally, completely unaware of HA.
-
-## ✨ Features
-
-### Zero Friction
-
-- ✅ **One Label**: Add `zen-lead/pool: <name>` to your Deployment
-- ✅ **Auto-Detection**: Automatically detects resource type and applies correct strategy
-- ✅ **Smart Defaults**: Replicas > 1 = HA enabled automatically
-- ✅ **Zero Code Changes**: Applications are completely HA-unaware (no `IsLeader()` checks)
-- ✅ **Gatekeeper Pattern**: Actively blocks non-leader Pod creation at the API level
-- ✅ **Standard Primitives**: Uses native Kubernetes Services and Validating Admission Webhooks
-
-### Universal Compatibility
-
-- ✅ **Any Workload**: Deployments, StatefulSets, Jobs, CronJobs
-- ✅ **Any Language**: Python, Node.js, Java, Go, Bash, etc.
-- ✅ **Any Framework**: Works with controller-runtime, client-go, or no framework
-- ✅ **Legacy Apps**: Works with unmodifiable applications
-
-### Automatic Failover
-
-- ✅ **Millisecond Switching**: Traffic switches in ~2-3 seconds
-- ✅ **Self-Healing**: Detects leader changes automatically
-- ✅ **No Manual Intervention**: Everything happens automatically
-
-## 🏗️ Architecture
-
-### The "Non-Invasive Traffic Director" Pattern
-
-**Key Principle:** zen-lead does NOT mutate workload pods or interfere with existing Services. It creates a new selector-less Service with controller-managed EndpointSlice.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    User Workflow                           │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-        1. Add label: zen-lead/pool: zen-flow-pool
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  zen-lead Controller                        │
-│                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │ Auto-Detect  │  │ Select       │  │ NO POD       │     │
-│  │ Resource     │─▶│ Leader Pod   │─▶│ MUTATION     │     │
-│  │ Type         │  │ (oldest Ready)│  │ (non-invasive)│     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-│                          │                                  │
-│                          ▼                                  │
-│  ┌──────────────────────────────────────────────┐          │
-│  │ Create Selector-Less Leader Service           │          │
-│  │ spec.selector: nil (no selector!)             │          │
-│  │                                                │          │
-│  │ Create/Update EndpointSlice                   │          │
-│  │ Points to single leader pod IP                │          │
-│  └──────────────────────────────────────────────┘          │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│          Kubernetes Service Discovery                       │
-│                                                              │
-│  Service: zen-flow-leader (selector-less)                  │
-│  EndpointSlice: Managed by controller                       │
-│    - Single endpoint: leader pod IP                         │
-│                                                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │ Leader Pod   │  │ Follower    │  │ Follower    │        │
-│  │ (receives    │  │ Pod         │  │ Pod         │        │
-│  │  traffic via │  │ (untouched) │  │ (untouched) │        │
-│  │  leader svc) │  │             │  │             │        │
-│  └─────────────┘  └─────────────┘  └─────────────┘        │
-│                                                              │
-│  Original Service: zen-flow-controller (unchanged)         │
-│  Still works normally, routes to all pods                   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Non-Invasive Benefits:**
-- ✅ **No pod mutation**: Workload pods are never patched or labeled
-- ✅ **No Service interference**: Original Service continues working normally
-- ✅ **Controller-driven selection**: Leader chosen by controller based on pod readiness
-- ✅ **Automatic failover**: When leader becomes unhealthy, controller selects new leader
-
-### Auto-Detection Logic
-
-zen-lead automatically detects the resource type and applies the correct strategy:
-
-| Resource Type | Strategy | Behavior |
-|--------------|----------|----------|
-| Deployment | TrafficDirector | Creates selector-less Service + EndpointSlice pointing to leader |
-| StatefulSet | TrafficDirector | Creates selector-less Service + EndpointSlice pointing to leader |
-| Service | TrafficDirector | Creates selector-less leader Service + EndpointSlice (annotate Service with zen-lead.io/enabled: "true") |
-| Job | StateGuard | Only leader executes logic |
-| CronJob | StateGuard | Only leader executes logic |
-
-**Smart Defaults:**
-- If `replicas > 1` → HA is automatically enabled
-- If `replicas = 1` → HA is skipped (single replica mode)
-
-## 📖 Integration Guide
-
-### For zen-flow, zen-lock, zen-watcher
-
-**Step 1:** Install zen-lead (if not already installed)
+### Step 2: Enable Zen-Lead
 
 ```bash
-helm install zen-lead zen-lead/zen-lead \
-  --namespace zen-lead-system \
-  --create-namespace
+# Annotate the Service
+kubectl annotate service my-app zen-lead.io/enabled=true
 ```
 
-**Step 2:** Create LeaderPolicy
+### Step 3: Use the Leader Service
 
 ```yaml
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
-metadata:
-  name: zen-flow-pool
-  namespace: zen-flow-system
-spec:
-  leaseDurationSeconds: 15
+# Update your application config
+env:
+- name: SERVICE_NAME
+  value: my-app-leader  # Points only to current leader
 ```
 
-**Step 3:** Add label to Deployment
+**That's it!** Zen-Lead automatically:
+- Creates `my-app-leader` Service (selector-less)
+- Creates EndpointSlice pointing to leader pod
+- Updates EndpointSlice when leader changes
+- Cleans up when annotation is removed
 
-```yaml
-metadata:
-  labels:
-    zen-lead/pool: zen-flow-pool  # Add this label
-spec:
-  replicas: 3  # Scale to 3 for HA
-```
+## 📖 Usage Examples
 
-**Step 4:** Configure application to use Leader Service
-
-```yaml
-# In your application config or environment variables
-SERVICE_NAME: zen-flow-leader  # Points only to current leader pod
-```
-
-**That's it!** No code changes required. Traffic automatically routes to the leader.
-
-**Alternative: Service-based opt-in** (no Deployment label needed)
+### Basic Usage
 
 ```yaml
 apiVersion: v1
@@ -226,296 +101,242 @@ metadata:
   name: my-app
   annotations:
     zen-lead.io/enabled: "true"
-    zen-lead/pool: my-pool
 spec:
   selector:
     app: my-app
   ports:
   - port: 80
+    targetPort: 8080
 ```
 
-zen-lead will automatically create `my-app-leader` Service pointing to the leader pod.
+**Result:** `my-app-leader` Service routes to exactly one Ready pod.
 
-### For Any Kubernetes Application
+### Named TargetPort
 
-Same process:
-
-1. Install zen-lead (one-time, cluster-wide)
-2. Create LeaderPolicy
-3. Add `zen-lead/pool: <pool-name>` label to Deployment (or annotate Service with `zen-lead.io/enabled: "true"`)
-4. Configure app to use `<deployment-name>-leader` Service (or `<service-name>-leader` if using Service annotation)
-
-**Works with any application—no code changes needed!**
-
-## 🔧 Simple Query API
-
-For applications that want to check leader status programmatically, zen-lead provides a simple client SDK:
-
-```go
-import "github.com/kube-zen/zen-lead/pkg/client"
-
-// Create client
-zenleadClient, _ := client.NewClient(mgr.GetClient())
-
-// Check if this pod is the leader
-isLeader, err := zenleadClient.IsLeader(ctx, "zen-flow-pool")
-if err != nil {
-    // Fail-safe: assume leader if zen-lead not installed
-}
-if !isLeader {
-    // Skip processing - not the leader
-    return reconcile.Result{}, nil
-}
-
-// Proceed with leader-only logic
-```
-
-**Fail-Safe Behavior:**
-- If zen-lead is not installed → returns `true` (allows app to work)
-- If pod name cannot be determined → returns `true` (local dev)
-- If API error → returns `false` (conservative default)
-
-## 📊 Configuration
-
-### LeaderPolicy Spec
+Zen-Lead automatically resolves named targetPorts:
 
 ```yaml
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
+apiVersion: v1
+kind: Service
 metadata:
-  name: my-pool
-  namespace: my-namespace
+  name: my-app
+  annotations:
+    zen-lead.io/enabled: "true"
 spec:
-  # Lease duration in seconds (how long leader holds the lock)
-  leaseDurationSeconds: 15
-  
-  # Renew deadline in seconds (time to renew before losing leadership)
-  renewDeadlineSeconds: 10
-  
-  # Retry period in seconds (how often to retry acquiring leadership)
-  retryPeriodSeconds: 2
-  
-  # Identity strategy: 'pod' (uses Pod Name/UID) or 'custom' (uses annotation)
-  identityStrategy: pod
-  
-  # Follower behavior: 'standby' (pods stay running) or 'scaleDown' (scale to 0)
-  followerMode: standby
-```
-
-### Deployment Labels
-
-- `zen-lead/pool: <pool-name>` - **Required**: Name of the LeaderPolicy to join
-
-### Leader Service
-
-zen-lead automatically creates a **selector-less** Service named `<deployment-name>-leader` (or `<service-name>-leader` for Service-based opt-in):
-
-- **Selector**: `nil` (no selector - endpoints managed via EndpointSlice)
-- **Type**: ClusterIP (default)
-- **Ports**: Automatically detected from source Service or Deployment container ports
-- **EndpointSlice**: Controller-managed, contains single endpoint pointing to current leader pod
-
-**Important:** zen-lead does NOT mutate workload pods. The leader selection is controller-driven based on pod readiness (oldest Ready pod).
-
-## 🎯 Use Cases
-
-### Use Case 1: zen-flow with HA
-
-**Scenario:** Deploy zen-flow with 3 replicas, ensure only one processes JobFlows.
-
-**Solution:**
-```bash
-# 1. Install zen-lead
-helm install zen-lead zen-lead/zen-lead --namespace zen-lead-system --create-namespace
-
-# 2. Create LeaderPolicy
-kubectl apply -f leaderpolicy.yaml
-
-# 3. Add label to zen-flow Deployment
-kubectl label deployment zen-flow-controller zen-lead/pool=zen-flow-pool
-
-# 4. Scale to 3 replicas
-kubectl scale deployment zen-flow-controller --replicas=3
-```
-
-**Result:**
-- 3 zen-flow replicas running (pods are never mutated)
-- Only leader pod receives traffic via `zen-flow-leader` Service (selector-less, endpoints managed via EndpointSlice)
-- Original `zen-flow-controller` Service continues working normally
-- On leader failure, controller selects new leader (oldest Ready pod) and updates EndpointSlice
-- Zero code changes in zen-flow
-
-### Use Case 2: Multi-Component Coordination
-
-**Scenario:** Coordinate multiple components (zen-flow, zen-lock, zen-watcher) using a single zen-lead controller.
-
-**Solution:**
-```bash
-# Install zen-lead once (cluster-wide)
-helm install zen-lead zen-lead/zen-lead --namespace zen-lead-system --create-namespace
-
-# Create separate pools for each component
-kubectl apply -f zen-flow-pool.yaml
-kubectl apply -f zen-lock-pool.yaml
-kubectl apply -f zen-watcher-pool.yaml
-
-# Add pool labels to each deployment
-# zen-flow: zen-lead/pool: zen-flow-pool
-# zen-lock: zen-lead/pool: zen-lock-pool
-# zen-watcher: zen-lead/pool: zen-watcher-pool
-```
-
-**Result:**
-- One zen-lead controller manages all pools
-- Each component has its own leader Service (selector-less, non-invasive)
-- Independent leader election per component
-- Centralized HA management
-- No interference with existing Services or pods
-
-### Use Case 3: Standard Kubernetes Application
-
-**Scenario:** Make an existing Kubernetes application HA-aware without code changes.
-
-**Solution:**
-```yaml
-# 1. Create LeaderPolicy
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
-metadata:
-  name: my-app-pool
-  namespace: production
-spec:
-  leaseDurationSeconds: 15
-
-# 2. Add label to existing Deployment
+  selector:
+    app: my-app
+  ports:
+  - port: 80
+    targetPort: http  # Named port
+    name: http
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: my-app
-  namespace: production
-  labels:
-    zen-lead/pool: my-app-pool  # Add this
 spec:
-  replicas: 3
-  # ... existing spec
-
-# 3. Update application config to use Director Service
-# OLD: SERVICE_NAME=my-app
-# NEW: SERVICE_NAME=my-app-pool-director
+  template:
+    spec:
+      containers:
+      - name: app
+        ports:
+        - containerPort: 8080
+          name: http  # Matches targetPort name
 ```
 
-**Result:**
-- Application becomes HA-aware
-- No code changes required
-- No pod mutations (pods remain untouched)
-- Traffic automatically routes to leader via selector-less Service
-- Failover handled by controller (selects new leader when current leader becomes unhealthy)
+**Result:** EndpointSlice uses port 8080 (resolved from container port name).
 
-## 🔍 Troubleshooting
+### Custom Leader Service Name
 
-### Service Not Routing Traffic
-
-**Symptoms:** Director Service exists but no endpoints
-
-**Diagnosis:**
-```bash
-# Check leader Service (should have no selector)
-kubectl get service zen-flow-leader -o yaml
-# spec.selector should be null or empty
-
-# Check EndpointSlice (managed by controller)
-kubectl get endpointslice -l discovery.k8s.io/service-name=zen-flow-leader -o yaml
-
-# Check which pod is the leader (from EndpointSlice)
-kubectl get endpointslice -l discovery.k8s.io/service-name=zen-flow-leader -o jsonpath='{.items[0].endpoints[0].targetRef.name}'
-
-# Check pod readiness
-kubectl get pods -l app=zen-flow
+```yaml
+metadata:
+  annotations:
+    zen-lead.io/enabled: "true"
+    zen-lead.io/leader-service-name: "my-app-primary"
 ```
 
-**Solutions:**
-1. Ensure leader Service has `spec.selector: null` (no selector)
-2. Check EndpointSlice contains exactly one endpoint pointing to leader pod
-3. Verify leader pod is Ready (controller selects oldest Ready pod)
-4. Check zen-lead controller logs for errors
+**Result:** Creates `my-app-primary` instead of `my-app-leader`.
 
-### No Leader Elected
+## 🔧 Installation
 
-**Symptoms:** Leader Service has no endpoints or EndpointSlice is empty
+### Helm Installation (Recommended)
 
-**Diagnosis:**
 ```bash
-# Check LeaderPolicy status
-kubectl get leaderpolicy zen-flow-pool -o yaml
+# Add Helm repository
+helm repo add zen-lead https://kube-zen.github.io/zen-lead/charts
+helm repo update
 
+# Install zen-lead (namespace-scoped, non-invasive defaults)
+helm install zen-lead zen-lead/zen-lead \
+  --namespace default \
+  --create-namespace
+```
+
+### Verify Installation
+
+```bash
+# Check controller pods
+kubectl get pods -l app.kubernetes.io/name=zen-lead
+
+# Verify no pod mutation permissions
+kubectl auth can-i patch pods --as=system:serviceaccount:default:zen-lead
+# Should return: no
+```
+
+## 📊 Metrics & Observability
+
+Zen-Lead exposes Prometheus metrics at `/metrics` (port 8080):
+
+- `zen_lead_leader_duration_seconds` - How long a pod has been leader
+- `zen_lead_failover_count_total` - Total number of failovers
+- `zen_lead_reconciliation_duration_seconds` - Reconciliation duration
+- `zen_lead_pods_available` - Ready pods count
+- `zen_lead_port_resolution_failures_total` - Port resolution failures
+- `zen_lead_reconciliation_errors_total` - Reconciliation errors
+
+See [deploy/prometheus/prometheus-rules.yaml](deploy/prometheus/prometheus-rules.yaml) for alert rules and [deploy/grafana/dashboard.json](deploy/grafana/dashboard.json) for Grafana dashboard.
+
+## 🛠️ Troubleshooting
+
+### Leader Service Has No Endpoints
+
+```bash
 # Check EndpointSlice
-kubectl get endpointslice -l discovery.k8s.io/service-name=zen-flow-leader
+kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader
 
-# Check candidate pods (must be Ready)
-kubectl get pods -l zen-lead/pool=zen-flow-pool
-# Look for pods with Ready condition = True
+# Check if any pods are Ready
+kubectl get pods -l <selector> --field-selector=status.phase=Running
 
 # Check controller logs
-kubectl logs -n zen-lead-system deployment/zen-lead-controller
+kubectl logs -l app.kubernetes.io/name=zen-lead --tail=100
 ```
 
 **Solutions:**
-1. Ensure pods have `zen-lead/pool` label (on Deployment, not pods)
-2. Ensure LeaderPolicy exists
-3. Verify at least one pod is Ready (controller selects oldest Ready pod)
-4. Check zen-lead controller logs for errors
-5. Note: zen-lead does NOT label pods - leader selection is controller-driven
+1. Ensure at least one pod is Ready (check readiness probe)
+2. Verify Service has a selector
+3. Check controller logs for errors
+
+### Port Resolution Fails
+
+```bash
+# Check events
+kubectl get events --field-selector involvedObject.name=<service> --sort-by='.lastTimestamp'
+
+# Verify container port names match targetPort
+kubectl get pod <leader-pod> -o jsonpath='{.spec.containers[*].ports[*].name}'
+```
+
+**Solutions:**
+1. Ensure container port names match Service targetPort names
+2. Check that leader pod has the named port
+3. Controller falls back to service port if resolution fails
+
+### Leader Doesn't Change on Failure
+
+```bash
+# Check pod readiness
+kubectl get pod <leader-pod> -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+
+# Check controller reconciliation
+kubectl logs -l app.kubernetes.io/name=zen-lead | grep -i reconcile
+```
+
+**Solutions:**
+1. Verify controller is running and reconciling
+2. Check if sticky leader is enabled (may delay failover)
+3. Ensure pod readiness transitions are detected
+
+## 📋 Day-0 Contract (Guaranteed)
+
+**Zen-Lead v0.1.0 provides a minimal, production-ready leader election solution with these guarantees:**
+
+### ✅ What's Included (Day-0)
+
+- **CRD-Free**: No CustomResourceDefinitions required. Works with standard Kubernetes resources only.
+- **No Webhook**: No validating or mutating admission webhooks. Zero impact on API server performance.
+- **No Pod Mutation**: Never patches or updates workload pods. Completely non-invasive.
+- **Service Annotation Opt-In**: Simple annotation-based opt-in (`zen-lead.io/enabled: "true"`).
+- **Managed Resources Only**: Creates only two resources per opted-in Service:
+  - Selector-less `<service-name>-leader` Service
+  - Single-endpoint EndpointSlice with Pod targetRef
+- **Vanilla Kubernetes**: Works on any Kubernetes cluster (1.24+) with default kube-proxy (iptables mode).
+- **Event-Driven**: Fast failover detection via Pod watch predicates (< 1 second controller-side).
+- **Secure Defaults**: Namespace-scoped RBAC, restricted security contexts, mandatory controller leader election.
+
+### 🚫 What's NOT Included (Day-0)
+
+- **No CRDs**: No LeaderPolicy or other CustomResourceDefinitions.
+- **No Webhooks**: No admission webhooks for gatekeeper or mutation patterns.
+- **No Pod Mutation**: No leader labels, annotations, or role assignments on workload pods.
+- **No Advanced Policies**: No multi-election, synthetic health checks, or complex configuration.
+- **No Dataplane Acceleration**: eBPF/Cilium/IPVS optimizations are optional and not required.
+
+### 🔮 Roadmap (Optional Add-ons)
+
+Future enhancements may include:
+- **Dataplane Acceleration**: Optional guidance for eBPF (Cilium), IPVS kube-proxy, or kube-proxy tuning to reduce dataplane convergence time.
+- **Advanced Configuration**: If introduced, will be a separate optional module/chart, never required for core functionality.
+
+**Important:** Roadmap items will never compromise the day-0 guarantee. The core product will always remain CRD-free, webhook-free, and pod-mutation-free.
+
+## ⚠️ Limitations
+
+### Network-Level Routing Only
+
+Zen-Lead provides **network-level single-active routing**. It does NOT:
+- Guarantee application-level correctness
+- Provide distributed consensus
+- Handle application state coordination
+- Prevent split-brain at application level
+
+**Use Case:** Suitable for stateless applications or applications that handle their own state coordination.
+
+### Failover Latency
+
+Failover is bounded by:
+- Pod readiness transition latency
+- Controller reconciliation latency (~1-2 seconds)
+- kube-proxy EndpointSlice update latency (~1-2 seconds)
+
+**Total:** Typically 2-5 seconds for complete failover.
+
+### NetworkPolicy Compatibility
+
+**NetworkPolicy is pod-based** - it applies to pods based on pod labels, not Service selectors. The leader Service being selector-less does **not** bypass NetworkPolicy.
+
+**Normal behavior:** NetworkPolicy rules that select pods by labels work correctly with zen-lead. Traffic to the leader pod is controlled by the same NetworkPolicy rules that apply to all pods in the Service.
+
+**Known limitation:** If you rely on NetworkPolicy rules that are keyed to Service selectors (non-standard pattern), you may need to adapt your policies. Standard pod-label-based NetworkPolicy works without changes.
+
+### Headless Services
+
+If the source Service is headless (`spec.clusterIP: None`), zen-lead still allows opt-in. The leader Service defaults to `ClusterIP` (normal) unless explicitly overridden. This ensures the leader Service is routable even when the source Service is headless.
+
+## 🔒 Security
+
+Zen-Lead follows Kubernetes security best practices:
+
+- **Non-Root Execution**: Runs as UID 65534 (nobody)
+- **Read-Only Root Filesystem**: Enabled by default
+- **No Privilege Escalation**: `allowPrivilegeEscalation: false`
+- **Dropped Capabilities**: All capabilities dropped
+- **Least-Privilege RBAC**: Minimal permissions by default (no pod mutation)
 
 ## 📚 Documentation
 
-- [Comprehensive Guide](/tmp/zen-lead-traffic-director-comprehensive.md) - Complete documentation
-- [API Reference](docs/API.md) - LeaderPolicy CRD specification
+- [Client Resilience Guide](docs/CLIENT_RESILIENCE.md) - **Read this for failover expectations and client best practices**
+- [Architecture](docs/ARCHITECTURE.md) - How zen-lead works internally
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
 - [Examples](examples/) - Example configurations
-- [Architecture](docs/ARCHITECTURE.md) - Detailed architecture documentation
 
-## 🤝 When to Use zen-lead vs zen-sdk
+## 🤝 Contributing
 
-### Use zen-lead (Universal Controller) When:
-
-- ✅ **Any Workload**: Deployments, StatefulSets, Jobs, CronJobs
-- ✅ **Zero Code Changes**: Can't modify application code
-- ✅ **Multi-Language**: Python, Node.js, Java, Bash, etc.
-- ✅ **Legacy Apps**: Unmodifiable applications
-- ✅ **Traffic Routing**: Need automatic traffic routing to leader
-
-### Use zen-sdk/pkg/leader (Library) When:
-
-- ✅ **Controller-Runtime**: Using controller-runtime framework
-- ✅ **Go Applications**: Can import Go libraries
-- ✅ **Source Code Access**: Can modify application code
-
-**Example:** zen-flow and zen-lock can use either:
-- **zen-lead**: Zero code changes, automatic traffic routing
-- **zen-sdk/pkg/leader**: Library-based, more control
-
-## 🛠️ Development
-
-```bash
-# Build
-make build
-
-# Run tests
-make test
-
-# Install CRDs
-make install
-
-# Run controller locally
-make run
-```
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 📄 License
 
-Apache License 2.0 - See [LICENSE](LICENSE) for details.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
 
----
+## 🙏 Acknowledgments
 
-**Repository:** [github.com/kube-zen/zen-lead](https://github.com/kube-zen/zen-lead)  
-**License:** Apache License 2.0  
-**Status:** Production-ready  
-**Version:** 0.2.0
+Zen-Lead is part of the [Kube-ZEN](https://github.com/kube-zen) project.

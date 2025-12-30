@@ -70,7 +70,7 @@ generate:
 		echo "$(YELLOW)⚠️  controller-gen not found, installing...$(NC)"; \
 		go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest; \
 	fi
-	controller-gen rbac:roleName=zen-lead-role crd webhook paths="./pkg/apis/..." output:crd:artifacts:config=config/crd/bases
+	controller-gen rbac:roleName=zen-lead-role paths="./pkg/..." output:rbac:artifacts:config=config/rbac
 	@echo "$(GREEN)✅ Code generated$(NC)"
 
 ## install: Install CRDs

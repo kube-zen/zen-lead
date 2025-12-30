@@ -14,6 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package client provides an optional client SDK for checking leader status.
+// NOTE: This client uses Leases and pool names, which are legacy features.
+// The primary zen-lead functionality uses Service-annotation opt-in and
+// network-level routing, which does not require this client SDK.
 package client
 
 import (

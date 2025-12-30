@@ -5,61 +5,71 @@
 | Version | Supported          |
 | ------- | ------------------ |
 | 0.1.x   | :white_check_mark: |
-| < 0.1   | :x:                |
+
+## Security Model
+
+Zen-Lead follows Kubernetes security best practices:
+
+### Non-Invasive Design
+
+- **No Pod Mutation:** Controller never patches or updates pods
+- **Read-Only Pod Access:** Controller only reads pod status
+- **Least-Privilege RBAC:** Minimal permissions required
+
+### RBAC Permissions
+
+**Day-0 Permissions (default):**
+- `pods`: `get`, `list`, `watch` (read-only)
+- `services`: `get`, `list`, `watch`, `create`, `update`, `patch`, `delete`
+- `endpointslices`: `get`, `list`, `watch`, `create`, `update`, `patch`, `delete`
+- `events`: `create`, `patch`
+
+**No Permissions For:**
+- `pods/patch` or `pods/update` (no pod mutation)
+- `coordination.kube-zen.io/leaderpolicies` (not used - CRD-free)
+
+**Required Permissions:**
+- `coordination.k8s.io/leases` (required for controller-runtime leader election)
+
+### Container Security
+
+- **Non-Root Execution:** Runs as UID 65534 (nobody)
+- **Read-Only Root Filesystem:** Enabled by default
+- **No Privilege Escalation:** `allowPrivilegeEscalation: false`
+- **Dropped Capabilities:** All capabilities dropped
+- **Seccomp Profile:** RuntimeDefault
+
+### Resource Isolation
+
+- **Ownership:** All generated resources owned by source Service
+- **Labels:** Clear labeling for identification (`app.kubernetes.io/managed-by: zen-lead`)
+- **Garbage Collection:** Automatic cleanup via owner references
 
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability, please report it to: security@kube-zen.io
 
-**Please do not** report security vulnerabilities through public GitHub issues.
+**Do not** open a public GitHub issue for security vulnerabilities.
 
 ## Security Considerations
 
-### RBAC Permissions
+### Network-Level Only
 
-Zen-Lead requires the following permissions:
+Zen-Lead provides network-level single-active routing. It does NOT:
+- Guarantee application-level correctness
+- Provide distributed consensus
+- Handle application state coordination
+- Prevent split-brain at application level
 
-- **LeaderPolicy CRDs**: Full CRUD access
-- **Lease Resources**: Full CRUD access (coordination.k8s.io)
-- **Pods**: Read and update (for role annotations)
+**Use Case:** Suitable for stateless applications or applications that handle their own state coordination.
 
-### Least Privilege
+### Failover Security
 
-- Controller runs as non-root user (UID 65532)
-- Read-only filesystem (where possible)
-- Minimal required permissions
+Failover is bounded by:
+- Pod readiness transition latency
+- Controller reconciliation latency (~1-2 seconds)
+- kube-proxy EndpointSlice update latency (~1-2 seconds)
 
-### Network Security
+**Total:** Typically 2-5 seconds for complete failover.
 
-- No external network dependencies
-- All communication via Kubernetes API server
-- Uses mTLS for API server communication (Kubernetes default)
-
-### Data Security
-
-- No secrets stored in CRDs
-- Pod annotations are visible to all users with pod read access
-- Lease resources contain pod identities (not sensitive)
-
-## Security Best Practices
-
-1. **RBAC:** Use least-privilege RBAC
-2. **Network Policies:** Restrict pod-to-pod communication
-3. **Pod Security:** Use PodSecurity standards
-4. **Secrets:** Never store secrets in annotations
-5. **Monitoring:** Monitor for unauthorized access
-
-## Known Limitations
-
-- Pod annotations are visible to all users with pod read access
-- Leader identity is stored in Lease resource (visible to all users)
-- No encryption at rest for CRDs (uses etcd encryption if enabled)
-
-## Security Updates
-
-Security updates will be released as patch versions (e.g., 0.1.1).
-
----
-
-**Last Updated:** 2025-01-XX
-
+During failover, there may be a brief period where no leader is selected (clean failure mode).

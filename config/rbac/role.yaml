@@ -3,31 +3,33 @@ kind: ClusterRole
 metadata:
   name: zen-lead-role
 rules:
-- apiGroups: ["coordination.kube-zen.io"]
-  resources: ["leaderpolicies"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["coordination.kube-zen.io"]
-  resources: ["leaderpolicies/status"]
-  verbs: ["get", "update", "patch"]
-- apiGroups: ["coordination.kube-zen.io"]
-  resources: ["leaderpolicies/finalizers"]
-  verbs: ["update"]
-- apiGroups: ["coordination.k8s.io"]
-  resources: ["leases"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["services"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: ["discovery.k8s.io"]
-  resources: ["endpointslices"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: [""]
-  resources: ["events"]
-  verbs: ["create", "patch"]
-
+  # Read-only access to pods (for leader selection)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  
+  # Read access to services (to detect opt-in annotations and mirror ports)
+  # Write access for managed leader services (create, update, patch, delete)
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Read access to existing endpointslices (for drift detection)
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  
+  # Write access to leader endpointslices only (managed by zen-lead)
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["create", "update", "patch", "delete"]
+  
+  # Events for observability (leader changes, warnings)
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  
+  # Leader election (required by controller-runtime for HA)
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]

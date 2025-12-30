@@ -2,366 +2,260 @@
 
 ## Overview
 
-This guide explains how to integrate zen-lead with your Kubernetes workloads to enable High Availability (HA).
+This guide explains how to integrate zen-lead with your Kubernetes workloads to enable network-level single-active routing.
 
 ## Quick Integration
 
 ### Step 1: Install Zen-Lead
 
 ```bash
-# Install CRDs
-kubectl apply -f config/crd/bases/
+# Using Helm (recommended)
+helm install zen-lead zen-lead/zen-lead \
+  --namespace default \
+  --create-namespace
 
-# Install RBAC
+# Or using kubectl
 kubectl apply -f config/rbac/
-
-# Install Controller
 kubectl apply -f deploy/
 ```
 
-### Step 2: Create LeaderPolicy
+### Step 2: Annotate Your Service
 
 ```yaml
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
+apiVersion: v1
+kind: Service
 metadata:
-  name: my-controller-pool
-  namespace: default
+  name: my-app
+  annotations:
+    zen-lead.io/enabled: "true"  # Enable zen-lead
 spec:
-  leaseDurationSeconds: 15
-  identityStrategy: pod
-  followerMode: standby
+  selector:
+    app: my-app
+  ports:
+  - port: 80
+    targetPort: 8080
 ```
 
-### Step 3: Annotate Your Deployment
+### Step 3: Use the Leader Service
+
+Update your application configuration to use `<service-name>-leader`:
 
 ```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: my-controller
-spec:
-  replicas: 3
-  template:
-    metadata:
-      annotations:
-        zen-lead/pool: my-controller-pool
-        zen-lead/join: "true"
+# Deployment environment variable
+env:
+- name: SERVICE_NAME
+  value: my-app-leader  # Points only to current leader
 ```
 
-**That's it!** Only 1 of 3 replicas will be active.
+**That's it!** Zen-lead automatically:
+- Creates `my-app-leader` Service (selector-less)
+- Creates EndpointSlice pointing to leader pod
+- Updates EndpointSlice when leader changes
+- Cleans up when annotation is removed
 
 ## Integration Patterns
 
-### Pattern 1: Check Annotation in Application
+### Pattern 1: Environment Variable
 
-**Use Case:** Your application needs to know if it's the leader
-
-**Implementation:**
-
-```go
-package main
-
-import (
-    "os"
-    "k8s.io/client-go/kubernetes"
-    "k8s.io/client-go/rest"
-)
-
-func isLeader() bool {
-    podName := os.Getenv("POD_NAME")
-    namespace := os.Getenv("POD_NAMESPACE")
-    
-    // Get pod
-    config, _ := rest.InClusterConfig()
-    clientset, _ := kubernetes.NewForConfig(config)
-    pod, _ := clientset.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
-    
-    // Check annotation
-    role, ok := pod.Annotations["zen-lead/role"]
-    return ok && role == "leader"
-}
-
-func main() {
-    if isLeader() {
-        // Only leader does this work
-        startReconciliation()
-    } else {
-        // Follower waits
-        waitForLeadership()
-    }
-}
-```
-
-### Pattern 2: Query LeaderPolicy Status
-
-**Use Case:** External application needs to know who's the leader
-
-**Implementation:**
-
-```bash
-# Get current leader
-LEADER=$(kubectl get leaderpolicy my-pool -o jsonpath='{.status.currentHolder.name}')
-
-# Check if current pod is leader
-if [ "$LEADER" == "$POD_NAME" ]; then
-    echo "I am the leader"
-fi
-```
-
-### Pattern 3: Environment Variable Injection
-
-**Use Case:** Inject leader status as environment variable
-
-**Implementation:**
+**Use Case:** Applications that read service name from environment
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
+metadata:
+  name: my-app
 spec:
   template:
     spec:
       containers:
       - name: app
         env:
-        - name: IS_LEADER
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.annotations['zen-lead/role']
-        # Note: This requires Kubernetes 1.28+ for annotation fieldRef
-```
-
-## Integration Examples
-
-### Example 1: zen-flow Integration
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
+        - name: SERVICE_NAME
+          value: my-app-leader  # Use leader service
+---
+apiVersion: v1
+kind: Service
 metadata:
-  name: zen-flow-controller
-spec:
-  replicas: 3
-  template:
-    metadata:
-      annotations:
-        zen-lead/pool: flow-controller
-        zen-lead/join: "true"
-```
-
-**Result:** Only 1 replica actively reconciles JobFlows.
-
-### Example 2: zen-watcher Integration
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: zen-watcher
-spec:
-  replicas: 3
-  template:
-    metadata:
-      annotations:
-        zen-lead/pool: watcher-primary
-        zen-lead/join: "true"
-```
-
-**Result:** Only 1 replica writes to Observation CRDs.
-
-### Example 3: CronJob Integration
-
-```yaml
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: daily-report
+  name: my-app
   annotations:
-    zen-lead/pool: report-generator
-    zen-lead/join: "true"
+    zen-lead.io/enabled: "true"
 spec:
-  schedule: "0 0 * * *"
-  jobTemplate:
+  selector:
+    app: my-app
+```
+
+### Pattern 2: ConfigMap Reference
+
+**Use Case:** Applications that read service name from ConfigMap
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  service-name: my-app-leader
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
     spec:
-      template:
-        metadata:
-          annotations:
-            zen-lead/pool: report-generator
-            zen-lead/join: "true"
+      containers:
+      - name: app
+        envFrom:
+        - configMapRef:
+            name: app-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+  annotations:
+    zen-lead.io/enabled: "true"
+spec:
+  selector:
+    app: my-app
 ```
 
-**Result:** Only 1 cluster instance executes, even with multiple nodes.
+### Pattern 3: Service Discovery
 
-## Best Practices
-
-### 1. Use Descriptive Pool Names
+**Use Case:** Applications using Kubernetes service discovery
 
 ```yaml
-# Good
-zen-lead/pool: flow-controller
-zen-lead/pool: watcher-primary
+# Application code (example)
+# Instead of: my-app.default.svc.cluster.local
+# Use: my-app-leader.default.svc.cluster.local
 
-# Bad
-zen-lead/pool: pool1
-zen-lead/pool: test
-```
-
-### 2. Set Appropriate Lease Duration
-
-```yaml
-# For fast failover (high availability)
-leaseDurationSeconds: 10
-renewDeadlineSeconds: 7
-
-# For stable workloads (default)
-leaseDurationSeconds: 15
-renewDeadlineSeconds: 10
-```
-
-### 3. Monitor Leader Transitions
-
-```bash
-# Alert on frequent leadership changes
-kubectl get leaderpolicy my-pool -o jsonpath='{.status.conditions[?(@.type=="LeaderElected")]}'
-```
-
-### 4. Use Standby Mode for Most Cases
-
-```yaml
-# Recommended for most workloads
-followerMode: standby
-
-# Only use scaleDown if you need resource savings
-followerMode: scaleDown  # Phase 2 feature
-```
-
-## Troubleshooting
-
-### Issue: No Leader Elected
-
-**Symptoms:**
-- `status.phase: Electing`
-- `status.currentHolder: null`
-
-**Possible Causes:**
-1. No pods with pool annotation
-2. Pods not running
-3. RBAC issues
-
-**Solutions:**
-```bash
-# Check for candidates
-kubectl get pods -l zen-lead/pool=my-pool
-
-# Check pod annotations
-kubectl get pod <pod-name> -o jsonpath='{.metadata.annotations}'
-
-# Check RBAC
-kubectl auth can-i create leases --namespace=default
-```
-
-### Issue: Multiple Leaders
-
-**Symptoms:**
-- Multiple pods with `zen-lead/role: leader`
-
-**Possible Causes:**
-1. Clock skew
-2. Network partition
-3. Lease API issues
-
-**Solutions:**
-```bash
-# Check system time
-date
-
-# Check Lease resource
-kubectl get lease my-pool -o yaml
-
-# Verify network connectivity
-```
-
-### Issue: Leader Not Processing
-
-**Symptoms:**
-- `status.currentHolder` is set
-- But application not doing work
-
-**Possible Causes:**
-1. Application not checking annotation
-2. Application crashed
-3. Context cancellation
-
-**Solutions:**
-```bash
-# Check pod logs
-kubectl logs <leader-pod>
-
-# Verify annotation
-kubectl get pod <leader-pod> -o jsonpath='{.metadata.annotations.zen-lead/role}'
-
-# Check application code
+# DNS resolution automatically points to leader pod
 ```
 
 ## Advanced Configuration
 
-### Custom Identity Strategy
+### Custom Leader Service Name
 
 ```yaml
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+  annotations:
+    zen-lead.io/enabled: "true"
+    zen-lead.io/leader-service-name: "my-app-primary"  # Custom name
 spec:
-  identityStrategy: custom
+  selector:
+    app: my-app
 ```
 
-**Requires:**
-- Set `ZEN_LEAD_IDENTITY` environment variable in pods
-- Or use `zen-lead/identity` annotation
+**Result:** Creates `my-app-primary` instead of `my-app-leader`.
 
-### Multiple Pools
-
-You can have multiple LeaderPolicies for different workloads:
+### Disable Sticky Leader
 
 ```yaml
-# Pool 1: Controller HA
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
+apiVersion: v1
+kind: Service
 metadata:
-  name: controller-pool
-
----
-# Pool 2: CronJob
-apiVersion: coordination.kube-zen.io/v1alpha1
-kind: LeaderPolicy
-metadata:
-  name: cronjob-pool
+  name: my-app
+  annotations:
+    zen-lead.io/enabled: "true"
+    zen-lead.io/sticky: "false"  # Disable sticky leader
+spec:
+  selector:
+    app: my-app
 ```
 
-## Migration from Custom Leader Election
+**Result:** Leader selection always chooses oldest Ready pod (no sticky behavior).
 
-If you have existing leader election code:
+### Named TargetPort
 
-1. **Remove custom code:**
-   - Delete leader election implementation
-   - Remove leaderelection imports
+Zen-lead automatically resolves named targetPorts:
 
-2. **Add annotations:**
-   ```yaml
-   annotations:
-     zen-lead/pool: my-pool
-     zen-lead/join: "true"
-   ```
-
-3. **Update application:**
-   - Check `zen-lead/role` annotation instead of `IsLeader()`
-   - Or query LeaderPolicy status
-
-4. **Test:**
-   - Verify only 1 leader
-   - Test failover
-   - Monitor transitions
-
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-server
+  annotations:
+    zen-lead.io/enabled: "true"
+spec:
+  selector:
+    app: api-server
+  ports:
+  - port: 443
+    targetPort: https  # Named port
+    name: https
 ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+spec:
+  template:
+    spec:
+      containers:
+      - name: api
+        ports:
+        - containerPort: 8443
+          name: https  # Must match targetPort name
+```
 
-**See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture information.**
+**Result:** EndpointSlice uses port 8443 (resolved from container port name).
 
+## Verification
+
+### Check Leader Service
+
+```bash
+# Get leader Service
+kubectl get service my-app-leader
+
+# Verify selector is null
+kubectl get service my-app-leader -o jsonpath='{.spec.selector}'
+# Should return: null
+```
+
+### Check EndpointSlice
+
+```bash
+# Get EndpointSlice
+kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader
+
+# Check endpoints
+kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -o jsonpath='{.items[*].endpoints[*].addresses}'
+# Should show exactly one IP (leader pod)
+```
+
+### Test Failover
+
+```bash
+# Get current leader pod
+kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -o jsonpath='{.items[*].endpoints[*].targetRef.name}'
+
+# Delete leader pod
+kubectl delete pod <leader-pod-name>
+
+# Watch for new leader
+kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -w
+```
+
+## Troubleshooting
+
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues and solutions.
+
+## Best Practices
+
+1. **Use Readiness Probes:** Ensure pods have proper readiness probes for accurate leader selection
+2. **Monitor Metrics:** Use Prometheus metrics to monitor failover rate and reconciliation duration
+3. **Test Failover:** Regularly test failover scenarios to ensure reliability
+4. **Resource Limits:** Set appropriate resource limits to prevent pod evictions
+5. **Multiple Replicas:** Run at least 2-3 replicas for high availability
+
+## Limitations
+
+- **Network-Level Only:** Provides network routing, not application-level coordination
+- **Failover Latency:** 2-5 seconds typical failover time
+- **No State Coordination:** Applications must handle their own state coordination
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture information.
