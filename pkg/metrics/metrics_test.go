@@ -47,7 +47,7 @@ func TestRecordLeaderDuration(t *testing.T) {
 	// Record leader duration - should not panic (no pod label for cardinality)
 	recorder.RecordLeaderDuration("default", "my-service", 125.5)
 	recorder.RecordLeaderDuration("default", "my-service", 250.0)
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -57,7 +57,7 @@ func TestRecordFailover(t *testing.T) {
 	// Record failover - should not panic (with reason label)
 	recorder.RecordFailover("default", "my-service", "notReady")
 	recorder.RecordFailover("default", "my-service", "terminating")
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -80,7 +80,7 @@ func TestRecordPodsAvailable(t *testing.T) {
 	// Record pods available - should not panic
 	recorder.RecordPodsAvailable("default", "my-service", 3)
 	recorder.RecordPodsAvailable("default", "my-service", 5)
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -90,7 +90,7 @@ func TestRecordPortResolutionFailure(t *testing.T) {
 	// Record port resolution failure - should not panic
 	recorder.RecordPortResolutionFailure("default", "my-service", "http")
 	recorder.RecordPortResolutionFailure("default", "my-service", "http")
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -99,7 +99,7 @@ func TestRecordReconciliationError(t *testing.T) {
 
 	// Record reconciliation error - should not panic
 	recorder.RecordReconciliationError("default", "my-service", "list_pods_failed")
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -111,7 +111,7 @@ func TestResetLeaderDuration(t *testing.T) {
 
 	// Reset it - should not panic (no pod label)
 	recorder.ResetLeaderDuration("default", "my-service")
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -120,7 +120,7 @@ func TestRecordLeaderServicesTotal(t *testing.T) {
 
 	// Record leader services total - should not panic
 	recorder.RecordLeaderServicesTotal("default", 5)
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -129,7 +129,7 @@ func TestRecordEndpointSlicesTotal(t *testing.T) {
 
 	// Record endpoint slices total - should not panic
 	recorder.RecordEndpointSlicesTotal("default", 5)
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -138,7 +138,7 @@ func TestRecordStickyLeaderHit(t *testing.T) {
 
 	// Record sticky leader hit - should not panic
 	recorder.RecordStickyLeaderHit("default", "my-service")
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -147,7 +147,7 @@ func TestRecordStickyLeaderMiss(t *testing.T) {
 
 	// Record sticky leader miss - should not panic
 	recorder.RecordStickyLeaderMiss("default", "my-service")
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -156,7 +156,7 @@ func TestRecordLeaderSelectionAttempt(t *testing.T) {
 
 	// Record leader selection attempt - should not panic
 	recorder.RecordLeaderSelectionAttempt("default", "my-service")
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -165,7 +165,7 @@ func TestRecordLeaderPodAge(t *testing.T) {
 
 	// Record leader pod age - should not panic (no pod label for cardinality)
 	recorder.RecordLeaderPodAge("default", "my-service", 3600.0)
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -175,7 +175,7 @@ func TestRecordLeaderServiceWithoutEndpoints(t *testing.T) {
 	// Record service without endpoints - should not panic
 	recorder.RecordLeaderServiceWithoutEndpoints("default", "my-service", true)
 	recorder.RecordLeaderServiceWithoutEndpoints("default", "my-service", false)
-	
+
 	// Function executed without panic - test passes
 }
 
@@ -185,7 +185,6 @@ func TestRecordReconciliation(t *testing.T) {
 	// Record successful reconciliation - should not panic
 	recorder.RecordReconciliation("default", "my-service", "success")
 	recorder.RecordReconciliation("default", "my-service", "error")
-	
+
 	// Function executed without panic - test passes
 }
-

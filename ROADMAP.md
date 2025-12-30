@@ -16,84 +16,21 @@
 - [x] Helm chart with secure defaults
 - [x] Comprehensive documentation
 
-## Phase 2: Follower Mode Enhancements
+## Future Enhancements (Optional)
 
-**Status:** 🔄 Planned
+**Note:** All future enhancements will maintain the Day-0 contract. The core product will always remain CRD-free, webhook-free, and pod-mutation-free.
 
-### ScaleDown Mode
+### Optional Add-ons (If Introduced)
 
-- [ ] Implement scaleDown follower mode
-- [ ] HPA integration for automatic scaling
-- [ ] Resource optimization
-- [ ] Documentation
+If advanced features are introduced in the future, they will be:
+- Separate optional modules/charts
+- Never required for core functionality
+- Clearly documented as optional enhancements
 
-**Use Case:** Save resources by scaling followers to 0
-
-### Standby Enhancements
-
-- [ ] Health check integration
-- [ ] Readiness probe based on leader status
-- [ ] Metrics for follower/leader distribution
-
-## Phase 3: Distributed Locking
-
-**Status:** 🔄 Planned
-
-### ManualLock CRD
-
-- [ ] ManualLock CRD definition
-- [ ] Acquire/release lock operations
-- [ ] Lock expiration
-- [ ] Integration with zen-flow
-
-**Use Case:** Prevent parallel execution of critical sections
-
-### Lock API
-
-- [ ] REST API for lock operations
-- [ ] gRPC API for lock operations
-- [ ] Client libraries
-
-## Phase 4: Status API
-
-**Status:** 🔄 Planned
-
-### gRPC Endpoint
-
-- [ ] gRPC service for leader status
-- [ ] Query leader by pool name
-- [ ] Subscribe to leader changes
-
-### HTTP Endpoint
-
-- [ ] HTTP REST API
-- [ ] `/v1/leader/pool/{name}` endpoint
-- [ ] JSON response format
-
-**Use Case:** External applications querying leader status without Kubernetes API access
-
-## Phase 5: Advanced Features
-
-**Status:** 🔄 Future
-
-### Multi-Region Support
-
-- [ ] Cross-cluster leader election
-- [ ] Region-aware leader selection
-- [ ] Failover across regions
-
-### Metrics & Observability
-
-- [ ] Prometheus metrics
-- [ ] Leader transition metrics
-- [ ] Candidate count metrics
-- [ ] Grafana dashboards
-
-### Performance Optimizations
-
-- [ ] Caching for frequent queries
-- [ ] Batch updates
-- [ ] Optimized reconciliation
+**Examples of potential future add-ons:**
+- Advanced configuration options (if introduced, would be optional CRD-based)
+- Synthetic health checks (if introduced, would be optional)
+- Multi-election patterns (if introduced, would be optional)
 
 ### Latency Optimizations (Optional)
 

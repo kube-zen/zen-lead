@@ -68,7 +68,7 @@ func main() {
 
 	// Set REST config QPS/Burst to avoid self-throttling under churn
 	restConfig := ctrl.GetConfigOrDie()
-	restConfig.QPS = 50   // Default is 20, increase for faster reconciliation
+	restConfig.QPS = 50    // Default is 20, increase for faster reconciliation
 	restConfig.Burst = 100 // Default is 30, increase for burst handling
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{

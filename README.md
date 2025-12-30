@@ -265,8 +265,8 @@ kubectl logs -l app.kubernetes.io/name=zen-lead | grep -i reconcile
 
 ### 🚫 What's NOT Included (Day-0)
 
-- **No CRDs**: No LeaderPolicy or other CustomResourceDefinitions.
-- **No Webhooks**: No admission webhooks for gatekeeper or mutation patterns.
+- **No CRDs**: No CustomResourceDefinitions required.
+- **No Webhooks**: No admission webhooks.
 - **No Pod Mutation**: No leader labels, annotations, or role assignments on workload pods.
 - **No Advanced Policies**: No multi-election, synthetic health checks, or complex configuration.
 - **No Dataplane Acceleration**: eBPF/Cilium/IPVS optimizations are optional and not required.
