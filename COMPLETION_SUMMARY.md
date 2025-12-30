@@ -181,7 +181,7 @@ Zen-Lead is ready to integrate with:
 1. **controller-runtime**: Chosen for consistency with zen-flow and zen-lock
 2. **Annotation-based**: No code changes required (key differentiator)
 3. **Lease API**: Standard Kubernetes pattern
-4. **Zen branding**: All APIs use coordination.zen.io
+4. **Zen branding**: All APIs use coordination.kube-zen.io
 5. **Status API**: CRD status for querying leader
 
 ## ✅ Quality Checklist
@@ -205,7 +205,7 @@ Zen-Lead is ready to integrate with:
 - Pod role management
 
 ✅ **Zen Branding:**
-- All APIs use `coordination.zen.io`
+- All APIs use `coordination.kube-zen.io`
 - Consistent naming
 - Professional design
 
