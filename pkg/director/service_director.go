@@ -183,7 +183,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Fetch the Service
 	svc := &corev1.Service{}
 	if err := r.Get(ctx, req.NamespacedName, svc); err != nil {
-		// H011.6: Update cache on Service deletion
+		// Update cache on Service deletion
 		r.updateOptedInServicesCache(ctx, req.Namespace, logger)
 		// Service not found - cleanup leader resources
 		if client.IgnoreNotFound(err) == nil {
@@ -333,7 +333,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				}
 			}
 			r.Metrics.RecordFailover(svc.Namespace, svc.Name, reason)
-			// H011.8: Reset leader duration (no pod label - leader identity in annotations)
+			// Reset leader duration (no pod label - leader identity in annotations)
 			r.Metrics.ResetLeaderDuration(svc.Namespace, svc.Name)
 		}
 	}

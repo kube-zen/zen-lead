@@ -61,7 +61,7 @@ func NewRecorder() *Recorder {
 	// Create zen-lead-specific metrics
 	recorder := &Recorder{
 
-		// Leader duration: how long a pod has been the leader (H011.8: no pod label for cardinality)
+		// Leader duration: how long a pod has been the leader (no pod label for cardinality)
 		leaderDurationSeconds: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_leader_duration_seconds",
@@ -70,7 +70,7 @@ func NewRecorder() *Recorder {
 			[]string{"namespace", "service"},
 		),
 
-		// Failover count: total number of leader changes (H023: with reason label)
+		// Failover count: total number of leader changes (with reason label)
 		failoverCountTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_failover_count_total",
@@ -161,7 +161,7 @@ func NewRecorder() *Recorder {
 			[]string{"namespace", "service"},
 		),
 
-		// Leader pod age: age of the current leader pod in seconds (H011.8: no pod label for cardinality)
+		// Leader pod age: age of the current leader pod in seconds (no pod label for cardinality)
 		leaderPodAgeSeconds: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_leader_pod_age_seconds",
@@ -179,7 +179,7 @@ func NewRecorder() *Recorder {
 			[]string{"namespace", "service"},
 		),
 
-		// Reconciliations total: total number of reconciliations (H023: matches requirement)
+		// Reconciliations total: total number of reconciliations
 		reconciliationsTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_reconciliations_total",
@@ -188,7 +188,7 @@ func NewRecorder() *Recorder {
 			[]string{"namespace", "service", "result"},
 		),
 
-		// Leader stable: gauge indicating if leader exists and is Ready (H023)
+		// Leader stable: gauge indicating if leader exists and is Ready
 		leaderStable: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_leader_stable",
@@ -197,7 +197,7 @@ func NewRecorder() *Recorder {
 			[]string{"namespace", "service"},
 		),
 
-		// Endpoint write errors: errors writing EndpointSlice (H023)
+		// Endpoint write errors: errors writing EndpointSlice
 		endpointWriteErrorsTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_endpoint_write_errors_total",
@@ -211,14 +211,14 @@ func NewRecorder() *Recorder {
 	return recorder
 }
 
-// RecordLeaderDuration records how long the current leader pod has been the leader (H011.8: no pod label).
+// RecordLeaderDuration records how long the current leader pod has been the leader (no pod label for cardinality).
 // Call this periodically (e.g., on each reconciliation) to update the metric.
 // Leader identity is exposed via leader Service annotations (zen-lead.io/leader-pod-name, etc.)
 func (r *Recorder) RecordLeaderDuration(namespace, service string, durationSeconds float64) {
 	r.leaderDurationSeconds.WithLabelValues(namespace, service).Set(durationSeconds)
 }
 
-// RecordFailover increments the failover counter when a leader changes (H023: with reason).
+// RecordFailover increments the failover counter when a leader changes (with reason label).
 func (r *Recorder) RecordFailover(namespace, service, reason string) {
 	r.failoverCountTotal.WithLabelValues(namespace, service, reason).Inc()
 }
@@ -243,7 +243,7 @@ func (r *Recorder) RecordReconciliationError(namespace, service, errorType strin
 	r.reconciliationErrorsTotal.WithLabelValues(namespace, service, errorType).Inc()
 }
 
-// ResetLeaderDuration resets the leader duration metric (H011.8: no pod label).
+// ResetLeaderDuration resets the leader duration metric (no pod label for cardinality).
 // Call this when a pod is no longer the leader.
 func (r *Recorder) ResetLeaderDuration(namespace, service string) {
 	r.leaderDurationSeconds.WithLabelValues(namespace, service).Set(0)
@@ -274,7 +274,7 @@ func (r *Recorder) RecordLeaderSelectionAttempt(namespace, service string) {
 	r.leaderSelectionAttemptsTotal.WithLabelValues(namespace, service).Inc()
 }
 
-// RecordLeaderPodAge records the age of the current leader pod (H011.8: no pod label).
+// RecordLeaderPodAge records the age of the current leader pod (no pod label for cardinality).
 // Leader identity is exposed via leader Service annotations (zen-lead.io/leader-pod-name, etc.)
 func (r *Recorder) RecordLeaderPodAge(namespace, service string, ageSeconds float64) {
 	r.leaderPodAgeSeconds.WithLabelValues(namespace, service).Set(ageSeconds)
@@ -294,7 +294,7 @@ func (r *Recorder) RecordReconciliation(namespace, service, result string) {
 	r.reconciliationsTotal.WithLabelValues(namespace, service, result).Inc()
 }
 
-// RecordLeaderStable records leader stability (1 = leader exists and Ready, 0 = otherwise) (H023).
+// RecordLeaderStable records leader stability (1 = leader exists and Ready, 0 = otherwise).
 func (r *Recorder) RecordLeaderStable(namespace, service string, stable bool) {
 	value := 0.0
 	if stable {
@@ -303,7 +303,7 @@ func (r *Recorder) RecordLeaderStable(namespace, service string, stable bool) {
 	r.leaderStable.WithLabelValues(namespace, service).Set(value)
 }
 
-// RecordEndpointWriteError increments the endpoint write error counter (H023).
+// RecordEndpointWriteError increments the endpoint write error counter.
 func (r *Recorder) RecordEndpointWriteError(namespace, service string) {
 	r.endpointWriteErrorsTotal.WithLabelValues(namespace, service).Inc()
 }

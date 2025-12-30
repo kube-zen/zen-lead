@@ -44,7 +44,7 @@ func TestRecordLeaderDuration(t *testing.T) {
 	// without using a custom registry. For now, we verify the function works.
 	recorder := NewRecorder()
 
-	// Record leader duration - should not panic (H011.8: no pod label)
+	// Record leader duration - should not panic (no pod label for cardinality)
 	recorder.RecordLeaderDuration("default", "my-service", 125.5)
 	recorder.RecordLeaderDuration("default", "my-service", 250.0)
 	
@@ -54,7 +54,7 @@ func TestRecordLeaderDuration(t *testing.T) {
 func TestRecordFailover(t *testing.T) {
 	recorder := NewRecorder()
 
-	// Record failover - should not panic (H023: with reason)
+	// Record failover - should not panic (with reason label)
 	recorder.RecordFailover("default", "my-service", "notReady")
 	recorder.RecordFailover("default", "my-service", "terminating")
 	
@@ -163,7 +163,7 @@ func TestRecordLeaderSelectionAttempt(t *testing.T) {
 func TestRecordLeaderPodAge(t *testing.T) {
 	recorder := NewRecorder()
 
-	// Record leader pod age - should not panic (H011.8: no pod label)
+	// Record leader pod age - should not panic (no pod label for cardinality)
 	recorder.RecordLeaderPodAge("default", "my-service", 3600.0)
 	
 	// Function executed without panic - test passes
