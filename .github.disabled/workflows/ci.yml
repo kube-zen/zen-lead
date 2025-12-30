@@ -1,0 +1,24 @@
+# CI workflow (disabled per guardrails - scripts-only CI)
+# This file is kept for reference only
+
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-go@v4
+      with:
+        go-version: '1.24'
+    - name: Run tests
+      run: make test
+    - name: Run linters
+      run: make lint
+

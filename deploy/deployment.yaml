@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zen-lead-controller-manager
+  namespace: zen-system
+  labels:
+    app: zen-lead
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zen-lead
+  template:
+    metadata:
+      labels:
+        app: zen-lead
+    spec:
+      serviceAccountName: zen-lead-controller-manager
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+      - name: manager
+        image: kubezen/zen-lead:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - --metrics-bind-address=:8080
+        - --health-probe-bind-address=:8081
+        - --leader-elect=true
+        - --leader-election-namespace=zen-system
+        env:
+        - name: WATCH_NAMESPACE
+          value: ""
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        ports:
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+

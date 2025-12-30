@@ -1,0 +1,21 @@
+apiVersion: coordination.kube-zen.io/v1alpha1
+kind: LeaderPolicy
+metadata:
+  name: my-controller-pool
+  namespace: default
+spec:
+  # Lease duration in seconds (how long leader holds the lock)
+  leaseDurationSeconds: 15
+  
+  # Identity strategy: 'pod' (uses Pod Name/UID) or 'custom' (uses annotation)
+  identityStrategy: pod
+  
+  # Follower behavior: 'standby' (pods stay running) or 'scaleDown' (scale to 0)
+  followerMode: standby
+  
+  # Renew deadline in seconds (time to renew before losing leadership)
+  renewDeadlineSeconds: 10
+  
+  # Retry period in seconds (how often to retry acquiring leadership)
+  retryPeriodSeconds: 2
+

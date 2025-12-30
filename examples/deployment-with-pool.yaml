@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-controller
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-controller
+  template:
+    metadata:
+      labels:
+        app: my-controller
+      annotations:
+        # Join the leader election pool
+        zen-lead/pool: my-controller-pool
+        zen-lead/join: "true"
+    spec:
+      containers:
+      - name: controller
+        image: my-controller:latest
+        env:
+        # POD_NAME is automatically set by Kubernetes
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        # Your controller can check zen-lead/role annotation to know if it's the leader
+        # Or query the LeaderPolicy status to see who's the leader
+

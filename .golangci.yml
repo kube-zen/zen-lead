@@ -1,0 +1,46 @@
+linters-settings:
+  gofmt:
+    simplify: true
+  govet:
+    check-shadowing: true
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  gosimple:
+    checks: ["all"]
+  staticcheck:
+    checks: ["all"]
+  unused:
+    check-exported: true
+  gocritic:
+    enabled-tags:
+      - performance
+      - diagnostic
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+      - wrapperFunc
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - gocritic
+
+issues:
+  exclude-rules:
+    - path: _test.go
+      linters:
+        - errcheck
+        - gocritic
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
