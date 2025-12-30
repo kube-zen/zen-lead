@@ -38,11 +38,10 @@ const (
 	testService   = "test-app"
 )
 
-// TestBasicLeaderElection tests basic leader election functionality
-// Prerequisites: kind cluster with zen-lead controller running
-func TestBasicLeaderElection(t *testing.T) {
-	// This is a placeholder for e2e test structure
-	// Requires:
+// TestLeaderServiceCreation verifies leader Service is created when annotation is added
+func TestLeaderServiceCreation(t *testing.T) {
+	// Prerequisites: kind cluster with zen-lead controller running
+	// This test requires:
 	// 1. kind cluster setup
 	// 2. zen-lead controller deployed
 	// 3. Test app deployment
@@ -50,49 +49,71 @@ func TestBasicLeaderElection(t *testing.T) {
 	// 5. Verification of leader Service and EndpointSlice
 	
 	t.Skip("E2E tests require kind cluster setup. See test/e2e/README.md for setup instructions.")
-}
-
-// TestLeaderServiceCreation verifies leader Service is created when annotation is added
-func TestLeaderServiceCreation(t *testing.T) {
-	// Setup: Create test Service with annotation
-	// Verify: Leader Service exists, selector is null, ports mirrored
-	t.Skip("E2E test placeholder")
+	
+	// TODO: Implement when kind cluster is available
+	// ctx := context.Background()
+	// c := getTestClient(t)
+	// 
+	// // Create test namespace
+	// ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testNamespace}}
+	// require.NoError(t, c.Create(ctx, ns))
+	// defer c.Delete(ctx, ns)
+	// 
+	// // Create test Service with annotation
+	// svc := createTestService(ctx, c, testService, testNamespace)
+	// require.NoError(t, c.Create(ctx, svc))
+	// 
+	// // Wait for leader Service
+	// leaderSvc, err := waitForLeaderService(ctx, c, testService, testNamespace, 30*time.Second)
+	// require.NoError(t, err)
+	// 
+	// // Verify selector is null
+	// assert.Nil(t, leaderSvc.Spec.Selector)
+	// assert.Equal(t, testService+"-leader", leaderSvc.Name)
 }
 
 // TestEndpointSliceCreation verifies EndpointSlice is created with exactly one endpoint
 func TestEndpointSliceCreation(t *testing.T) {
+	t.Skip("E2E test placeholder - requires kind cluster")
+	
+	// TODO: Implement
 	// Setup: Service annotated, pods Ready
 	// Verify: EndpointSlice exists, has exactly one endpoint, points to leader pod
-	t.Skip("E2E test placeholder")
 }
 
 // TestFailover verifies failover when leader becomes NotReady
 func TestFailover(t *testing.T) {
+	t.Skip("E2E test placeholder - requires kind cluster")
+	
+	// TODO: Implement
 	// Setup: Service annotated, leader pod selected
 	// Action: Mark leader pod NotReady (or delete)
 	// Verify: EndpointSlice switches to new leader within expected window (2-5 seconds)
-	t.Skip("E2E test placeholder")
 }
 
 // TestCleanup verifies cleanup when annotation is removed
 func TestCleanup(t *testing.T) {
+	t.Skip("E2E test placeholder - requires kind cluster")
+	
+	// TODO: Implement
 	// Setup: Service annotated, leader Service and EndpointSlice exist
 	// Action: Remove annotation
 	// Verify: Leader Service and EndpointSlice are deleted (via GC)
-	t.Skip("E2E test placeholder")
 }
 
 // TestPortResolutionFailClosed verifies fail-closed behavior when port resolution fails
 func TestPortResolutionFailClosed(t *testing.T) {
+	t.Skip("E2E test placeholder - requires kind cluster")
+	
+	// TODO: Implement
 	// Setup: Service with named targetPort that doesn't match pod port name
 	// Verify: No EndpointSlice endpoints, Warning Event emitted, EndpointSlice deleted
-	t.Skip("E2E test placeholder")
 }
 
 // Helper functions for e2e tests
 
-func createTestService(ctx context.Context, c client.Client, name, namespace string) error {
-	svc := &corev1.Service{
+func createTestService(ctx context.Context, c client.Client, name, namespace string) *corev1.Service {
+	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -114,12 +135,6 @@ func createTestService(ctx context.Context, c client.Client, name, namespace str
 			},
 		},
 	}
-	return c.Create(ctx, svc)
-}
-
-func createTestDeployment(ctx context.Context, c client.Client, name, namespace string, replicas int32) error {
-	// Placeholder - requires apps/v1 import
-	return fmt.Errorf("not implemented")
 }
 
 func waitForLeaderService(ctx context.Context, c client.Client, name, namespace string, timeout time.Duration) (*corev1.Service, error) {
@@ -179,4 +194,3 @@ func waitForEndpointSlice(ctx context.Context, c client.Client, serviceName, nam
 	}
 	return &endpointSlice, nil
 }
-
