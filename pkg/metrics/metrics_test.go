@@ -106,10 +106,10 @@ func TestRecordReconciliationError(t *testing.T) {
 func TestResetLeaderDuration(t *testing.T) {
 	recorder := NewRecorder()
 
-	// Set leader duration (H011.8: no pod label)
+	// Set leader duration (no pod label)
 	recorder.RecordLeaderDuration("default", "my-service", 125.5)
 
-	// Reset it - should not panic (H011.8: no pod label)
+	// Reset it - should not panic (no pod label)
 	recorder.ResetLeaderDuration("default", "my-service")
 	
 	// Function executed without panic - test passes

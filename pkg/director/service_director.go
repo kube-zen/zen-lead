@@ -270,7 +270,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Get current leader from EndpointSlice (for failover detection)
 	currentLeaderPod := r.getCurrentLeaderPod(ctx, svc, logger)
 
-	// H012.2: Leader-fast-path - immediately failover if current leader is unhealthy
+	// Leader-fast-path - immediately failover if current leader is unhealthy
 	bypassStickiness := false
 	if currentLeaderPod != nil {
 		// Check if current leader is terminating, not Ready, or has no PodIP
@@ -297,7 +297,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// Select leader pod (with stickiness, unless current leader was unhealthy)
 	leaderPod := r.selectLeaderPod(ctx, svc, podList.Items, bypassStickiness, logger)
 
-	// Detect failover (leader changed) - H011.1: track leader switch time
+	// Detect failover (leader changed) - track leader switch time
 	leaderChanged := false
 	if currentLeaderPod != nil && leaderPod != nil {
 		// Compare by UID for restart safety
@@ -321,7 +321,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return "none"
 		}())
 		if r.Metrics != nil {
-			// H023: Record failover with reason
+			// : Record failover with reason
 			reason := "noneReady"
 			if currentLeaderPod != nil {
 				if currentLeaderPod.DeletionTimestamp != nil {
@@ -355,7 +355,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// For simplicity, use pod creation time. In future, could track leader acquisition time.
 		duration := time.Since(leaderPod.CreationTimestamp.Time).Seconds()
 		if r.Metrics != nil {
-			// H011.8: Record metrics without pod label (leader identity in annotations)
+			// Record metrics without pod label (leader identity in annotations)
 			r.Metrics.RecordLeaderDuration(svc.Namespace, svc.Name, duration)
 			r.Metrics.RecordLeaderPodAge(svc.Namespace, svc.Name, duration)
 		}
@@ -386,7 +386,7 @@ func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc
 		return nil
 	}
 
-	// Find the pod referenced in the EndpointSlice (H011.1: match by UID for restart safety)
+	// Find the pod referenced in the EndpointSlice (match by UID for restart safety)
 	for _, endpoint := range endpointSlice.Endpoints {
 		if endpoint.TargetRef != nil && endpoint.TargetRef.Kind == "Pod" && endpoint.TargetRef.UID != "" {
 			pod := &corev1.Pod{}
@@ -407,7 +407,7 @@ func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc
 }
 
 // selectLeaderPod selects the leader pod using controller-driven selection with stickiness
-// bypassStickiness: if true, forces new leader selection even if current leader exists (H012.2: leader-fast-path)
+// bypassStickiness: if true, forces new leader selection even if current leader exists (leader-fast-path)
 func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *corev1.Service, pods []corev1.Pod, bypassStickiness bool, logger klog.Logger) *corev1.Pod {
 	// Check if sticky is enabled (default: true)
 	sticky := true
@@ -417,7 +417,7 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 		}
 	}
 
-	// H012.2: If bypassStickiness is true, skip sticky check (force new leader selection)
+	// If bypassStickiness is true, skip sticky check (force new leader selection)
 	// If sticky, check existing EndpointSlice for current leader
 	if sticky && !bypassStickiness {
 		leaderServiceName := r.getLeaderServiceName(svc)
@@ -428,7 +428,7 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 		}
 
 		if err := r.Get(ctx, endpointSliceKey, endpointSlice); err == nil {
-			// Found existing EndpointSlice - check if current leader is still Ready (H011.1: match by UID)
+			// Found existing EndpointSlice - check if current leader is still Ready (match by UID)
 			for _, endpoint := range endpointSlice.Endpoints {
 				if endpoint.TargetRef != nil && endpoint.TargetRef.Kind == "Pod" && endpoint.TargetRef.UID != "" {
 					// Find the pod by UID (restart-safe)
@@ -454,7 +454,7 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 		}
 	}
 
-	// Filter to Ready pods only (H011.3: apply flap damping if configured)
+	// Filter to Ready pods only (apply flap damping if configured)
 	var readyPods []corev1.Pod
 	minReadyDuration := r.getMinReadyDuration(svc)
 	now := time.Now()
@@ -464,7 +464,7 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 			continue
 		}
 
-		// H011.3: Flap damping - pod must be Ready for at least minReadyDuration
+		// Flap damping - pod must be Ready for at least minReadyDuration
 		if minReadyDuration > 0 {
 			readySince := r.getPodReadySince(&pod)
 			if readySince == nil || now.Sub(*readySince) < minReadyDuration {
@@ -544,7 +544,7 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 		leaderLabels[LabelManagedBy] = LabelManagedByValue
 		leaderLabels[LabelSourceService] = svc.Name
 
-		// Build annotations for leader Service (H011.1: add leader tracking annotations)
+		// Build annotations for leader Service (add leader tracking annotations)
 		leaderAnnotations := filterGitOpsAnnotations(svc.Annotations)
 		if leaderPod != nil {
 			leaderAnnotations["zen-lead.io/current-leader"] = leaderPod.Name
@@ -576,7 +576,7 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 			},
 		}
 
-		// H011.5: Handle headless Services - if source is headless, default leader to ClusterIP
+		// Handle headless Services - if source is headless, default leader to ClusterIP
 		if svc.Spec.ClusterIP == corev1.ClusterIPNone {
 			leaderService.Spec.Type = corev1.ServiceTypeClusterIP
 			leaderService.Spec.ClusterIP = "" // Let Kubernetes assign ClusterIP
@@ -614,7 +614,7 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 		leaderService.Spec.Ports = leaderPorts
 		leaderService.Spec.Type = svc.Spec.Type
 
-		// H011.5: Handle headless Services - if source is headless, default leader to ClusterIP
+		// Handle headless Services - if source is headless, default leader to ClusterIP
 		if svc.Spec.ClusterIP == corev1.ClusterIPNone {
 			leaderService.Spec.Type = corev1.ServiceTypeClusterIP
 		}
@@ -623,7 +623,7 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 			leaderService.Spec.Type = corev1.ServiceTypeClusterIP
 		}
 
-		// Update leader annotations (H011.1: add pod-name, pod-uid, last-switch-time)
+		// Update leader annotations (add pod-name, pod-uid, last-switch-time)
 		if leaderService.Annotations == nil {
 			leaderService.Annotations = make(map[string]string)
 		}
@@ -661,7 +661,7 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 		return fmt.Errorf("failed to reconcile endpoint slice: %w", err)
 	}
 
-	// Record leader stability and endpoint status (H023)
+	// Record leader stability and endpoint status 
 	if r.Metrics != nil {
 		if leaderPod != nil && isPodReady(leaderPod) {
 			r.Metrics.RecordLeaderStable(svc.Namespace, svc.Name, true)
@@ -854,7 +854,7 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 		}
 
 		if err := r.Create(ctx, endpointSlice); err != nil {
-			// H023: Record endpoint write error
+			// : Record endpoint write error
 			if r.Metrics != nil {
 				r.Metrics.RecordEndpointWriteError(svc.Namespace, svc.Name)
 			}
@@ -881,7 +881,7 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 	endpointSlice.AddressType = addressType
 
 	if err := r.Patch(ctx, endpointSlice, client.MergeFrom(originalEndpointSlice)); err != nil {
-		// H023: Record endpoint write error
+		// : Record endpoint write error
 		if r.Metrics != nil {
 			r.Metrics.RecordEndpointWriteError(svc.Namespace, svc.Name)
 		}
@@ -976,7 +976,7 @@ func isPodReady(pod *corev1.Pod) bool {
 }
 
 // getPodReadySince returns the time when the pod became Ready (LastTransitionTime of Ready condition)
-// Returns nil if pod is not currently Ready (H011.3: flap damping)
+// Returns nil if pod is not currently Ready (flap damping)
 func (r *ServiceDirectorReconciler) getPodReadySince(pod *corev1.Pod) *time.Time {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
@@ -986,7 +986,7 @@ func (r *ServiceDirectorReconciler) getPodReadySince(pod *corev1.Pod) *time.Time
 	return nil
 }
 
-// getMinReadyDuration parses the min-ready-duration annotation (H011.3: flap damping)
+// getMinReadyDuration parses the min-ready-duration annotation (flap damping)
 func (r *ServiceDirectorReconciler) getMinReadyDuration(svc *corev1.Service) time.Duration {
 	if svc.Annotations == nil {
 		return 0 // Default: no flap damping
@@ -1015,9 +1015,9 @@ func (r *ServiceDirectorReconciler) getLeaderServiceName(svc *corev1.Service) st
 }
 
 // SetupWithManager sets up the ServiceDirectorReconciler with the manager
-// H012: Pod watch predicates filter to meaningful transitions only (Ready, deletionTimestamp, podIP, phase)
+// : Pod watch predicates filter to meaningful transitions only (Ready, deletionTimestamp, podIP, phase)
 func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// H012.1: Pod watch predicate - only react to meaningful transitions
+	// Pod watch predicate - only react to meaningful transitions
 	podPredicate := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			// Always reconcile on pod creation (may become leader candidate)
@@ -1030,7 +1030,7 @@ func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				return false
 			}
 
-			// H012.1: Check for meaningful transitions
+			// Check for meaningful transitions
 			// 1. Ready condition changed
 			oldReady := isPodReady(oldPod)
 			newReady := isPodReady(newPod)
@@ -1085,7 +1085,7 @@ func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&discoveryv1.EndpointSlice{},
 			handler.EnqueueRequestsFromMapFunc(r.mapEndpointSliceToService),
 		).
-		// H012.3: Bound reconcile concurrency + H012.4: Safety resync handled by informer cache (default 10m)
+		// Bound reconcile concurrency + Safety resync handled by informer cache (default 10m)
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: 10, // Bound reconcile concurrency to prevent starvation
 		}).
@@ -1093,11 +1093,11 @@ func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // mapPodToService maps Pod changes to Service reconciles (for failover detection)
-// H011.6: Uses cache/index for efficient pod-to-service mapping
+// Uses cache/index for efficient pod-to-service mapping
 func (r *ServiceDirectorReconciler) mapPodToService(ctx context.Context, obj client.Object) []reconcile.Request {
 	pod := obj.(*corev1.Pod)
 
-	// H011.6: Use cache to only check opted-in Services in this namespace
+	// Use cache to only check opted-in Services in this namespace
 	cachedServices := r.optedInServicesCache[pod.Namespace]
 	if len(cachedServices) == 0 {
 		// Cache miss - refresh cache for this namespace
@@ -1147,7 +1147,7 @@ func (r *ServiceDirectorReconciler) mapEndpointSliceToService(ctx context.Contex
 	}
 }
 
-// updateOptedInServicesCache updates the cache for a specific namespace (H011.6)
+// updateOptedInServicesCache updates the cache for a specific namespace 
 func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Context, namespace string, logger klog.Logger) {
 	serviceList := &corev1.ServiceList{}
 	if err := r.List(ctx, serviceList, client.InNamespace(namespace)); err != nil {
@@ -1174,7 +1174,7 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 	r.optedInServicesCache[namespace] = cached
 }
 
-// updateOptedInServicesCacheForService updates cache for a single Service (H011.6)
+// updateOptedInServicesCacheForService updates cache for a single Service 
 func (r *ServiceDirectorReconciler) updateOptedInServicesCacheForService(svc *corev1.Service, logger klog.Logger) {
 	if svc.Annotations == nil || svc.Annotations[AnnotationEnabledService] != "true" {
 		// Not opted in - remove from cache if present
