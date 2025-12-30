@@ -661,10 +661,14 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 		return fmt.Errorf("failed to reconcile endpoint slice: %w", err)
 	}
 
-	// Record that leader service has endpoints (if leader exists)
+	// Record leader stability and endpoint status (H023)
 	if r.Metrics != nil {
-		if leaderPod != nil {
+		if leaderPod != nil && isPodReady(leaderPod) {
+			r.Metrics.RecordLeaderStable(svc.Namespace, svc.Name, true)
 			r.Metrics.RecordLeaderServiceWithoutEndpoints(svc.Namespace, svc.Name, false)
+		} else {
+			r.Metrics.RecordLeaderStable(svc.Namespace, svc.Name, false)
+			r.Metrics.RecordLeaderServiceWithoutEndpoints(svc.Namespace, svc.Name, true)
 		}
 	}
 
