@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	"github.com/kube-zen/zen-sdk/pkg/leader"
 	"github.com/kube-zen/zen-lead/pkg/director"
 )
 
@@ -59,10 +60,10 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Leader election namespace from Downward API (POD_NAMESPACE)
-	leaderElectionNS := os.Getenv("POD_NAMESPACE")
-	if leaderElectionNS == "" {
-		setupLog.Error(nil, "POD_NAMESPACE environment variable must be set for leader election")
+	// Get pod namespace (required for leader election)
+	leaderElectionNS, err := leader.RequirePodNamespace()
+	if err != nil {
+		setupLog.Error(err, "failed to determine pod namespace for leader election")
 		os.Exit(1)
 	}
 
@@ -71,16 +72,19 @@ func main() {
 	restConfig.QPS = 50    // Default is 20, increase for faster reconciliation
 	restConfig.Burst = 100 // Default is 30, increase for burst handling
 
-	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
+	// Configure manager options
+	mgrOpts := ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
 		},
-		HealthProbeBindAddress:  probeAddr,
-		LeaderElection:          true, // Always enabled for HA safety
-		LeaderElectionID:        leaderElectionID,
-		LeaderElectionNamespace: leaderElectionNS,
-	})
+		HealthProbeBindAddress: probeAddr,
+	}
+
+	// Apply mandatory leader election (always enabled for HA safety)
+	leader.ApplyRequiredLeaderElection(&mgrOpts, "zen-lead-controller", leaderElectionNS, leaderElectionID)
+
+	mgr, err := ctrl.NewManager(restConfig, mgrOpts)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)

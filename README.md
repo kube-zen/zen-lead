@@ -9,6 +9,8 @@
 
 Zen-Lead is a **non-invasive leader election controller** for Kubernetes that provides network-level single-active routing without requiring application code changes or mutating workload pods.
 
+**Key Differentiation:** Unlike client-go leader election libraries (which require application code changes), zen-lead provides a **network contract** that works for any client, any language, without code changes. Simply annotate a Service and connect to the leader Service endpoint.
+
 ## 🎯 What Zen-Lead Does
 
 Zen-Lead watches Services with the `zen-lead.io/enabled: "true"` annotation and automatically:
