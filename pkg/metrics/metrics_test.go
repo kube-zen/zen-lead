@@ -54,9 +54,9 @@ func TestRecordLeaderDuration(t *testing.T) {
 func TestRecordFailover(t *testing.T) {
 	recorder := NewRecorder()
 
-	// Record failover - should not panic
-	recorder.RecordFailover("default", "my-service")
-	recorder.RecordFailover("default", "my-service")
+	// Record failover - should not panic (H023: with reason)
+	recorder.RecordFailover("default", "my-service", "notReady")
+	recorder.RecordFailover("default", "my-service", "terminating")
 	
 	// Function executed without panic - test passes
 }

@@ -38,6 +38,8 @@ type Recorder struct {
 	leaderPodAgeSeconds           *prometheus.GaugeVec
 	leaderServiceWithoutEndpoints *prometheus.GaugeVec
 	reconciliationsTotal          *prometheus.CounterVec
+	leaderStable                  *prometheus.GaugeVec
+	endpointWriteErrorsTotal      *prometheus.CounterVec
 }
 
 var (
@@ -68,13 +70,13 @@ func NewRecorder() *Recorder {
 			[]string{"namespace", "service"},
 		),
 
-		// Failover count: total number of leader changes
+		// Failover count: total number of leader changes (H023: with reason label)
 		failoverCountTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_failover_count_total",
 				Help: "Total number of leader failovers (leader changes)",
 			},
-			[]string{"namespace", "service"},
+			[]string{"namespace", "service", "reason"}, // reason: notReady, terminating, noIP, noneReady
 		),
 
 		// Reconciliation duration: duration of reconciliation loops
@@ -177,13 +179,31 @@ func NewRecorder() *Recorder {
 			[]string{"namespace", "service"},
 		),
 
-		// Reconciliations total: total number of reconciliations
+		// Reconciliations total: total number of reconciliations (H023: matches requirement)
 		reconciliationsTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_reconciliations_total",
 				Help: "Total number of reconciliations",
 			},
 			[]string{"namespace", "service", "result"},
+		),
+
+		// Leader stable: gauge indicating if leader exists and is Ready (H023)
+		leaderStable: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "zen_lead_leader_stable",
+				Help: "Leader stability indicator (1 = leader exists and is Ready, 0 = no leader or not Ready)",
+			},
+			[]string{"namespace", "service"},
+		),
+
+		// Endpoint write errors: errors writing EndpointSlice (H023)
+		endpointWriteErrorsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "zen_lead_endpoint_write_errors_total",
+				Help: "Total number of errors writing EndpointSlice",
+			},
+			[]string{"namespace", "service"},
 		),
 	}
 
@@ -198,9 +218,9 @@ func (r *Recorder) RecordLeaderDuration(namespace, service string, durationSecon
 	r.leaderDurationSeconds.WithLabelValues(namespace, service).Set(durationSeconds)
 }
 
-// RecordFailover increments the failover counter when a leader changes.
-func (r *Recorder) RecordFailover(namespace, service string) {
-	r.failoverCountTotal.WithLabelValues(namespace, service).Inc()
+// RecordFailover increments the failover counter when a leader changes (H023: with reason).
+func (r *Recorder) RecordFailover(namespace, service, reason string) {
+	r.failoverCountTotal.WithLabelValues(namespace, service, reason).Inc()
 }
 
 // RecordReconciliationDuration records the duration of a reconciliation loop.
@@ -272,6 +292,20 @@ func (r *Recorder) RecordLeaderServiceWithoutEndpoints(namespace, service string
 // RecordReconciliation records a reconciliation attempt (counter).
 func (r *Recorder) RecordReconciliation(namespace, service, result string) {
 	r.reconciliationsTotal.WithLabelValues(namespace, service, result).Inc()
+}
+
+// RecordLeaderStable records leader stability (1 = leader exists and Ready, 0 = otherwise) (H023).
+func (r *Recorder) RecordLeaderStable(namespace, service string, stable bool) {
+	value := 0.0
+	if stable {
+		value = 1.0
+	}
+	r.leaderStable.WithLabelValues(namespace, service).Set(value)
+}
+
+// RecordEndpointWriteError increments the endpoint write error counter (H023).
+func (r *Recorder) RecordEndpointWriteError(namespace, service string) {
+	r.endpointWriteErrorsTotal.WithLabelValues(namespace, service).Inc()
 }
 
 // Exported getters for testing (access to metric vectors)

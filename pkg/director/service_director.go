@@ -321,7 +321,18 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return "none"
 		}())
 		if r.Metrics != nil {
-			r.Metrics.RecordFailover(svc.Namespace, svc.Name)
+			// H023: Record failover with reason
+			reason := "noneReady"
+			if currentLeaderPod != nil {
+				if currentLeaderPod.DeletionTimestamp != nil {
+					reason = "terminating"
+				} else if !isPodReady(currentLeaderPod) {
+					reason = "notReady"
+				} else if currentLeaderPod.Status.PodIP == "" {
+					reason = "noIP"
+				}
+			}
+			r.Metrics.RecordFailover(svc.Namespace, svc.Name, reason)
 			// H011.8: Reset leader duration (no pod label - leader identity in annotations)
 			r.Metrics.ResetLeaderDuration(svc.Namespace, svc.Name)
 		}
@@ -839,6 +850,10 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 		}
 
 		if err := r.Create(ctx, endpointSlice); err != nil {
+			// H023: Record endpoint write error
+			if r.Metrics != nil {
+				r.Metrics.RecordEndpointWriteError(svc.Namespace, svc.Name)
+			}
 			return fmt.Errorf("failed to create endpoint slice: %w", err)
 		}
 		logger.Info("Created endpoint slice for leader pod", "endpointslice", endpointSliceName, "pod", func() string {
@@ -862,6 +877,10 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 	endpointSlice.AddressType = addressType
 
 	if err := r.Patch(ctx, endpointSlice, client.MergeFrom(originalEndpointSlice)); err != nil {
+		// H023: Record endpoint write error
+		if r.Metrics != nil {
+			r.Metrics.RecordEndpointWriteError(svc.Namespace, svc.Name)
+		}
 		return fmt.Errorf("failed to patch endpoint slice: %w", err)
 	}
 

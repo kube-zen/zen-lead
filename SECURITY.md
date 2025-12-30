@@ -26,7 +26,7 @@ Zen-Lead follows Kubernetes security best practices:
 
 **No Permissions For:**
 - `pods/patch` or `pods/update` (no pod mutation)
-- `coordination.kube-zen.io/leaderpolicies` (not used - CRD-free)
+- CRDs (CRD-free design)
 
 **Required Permissions:**
 - `coordination.k8s.io/leases` (required for controller-runtime leader election)
