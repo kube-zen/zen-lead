@@ -331,6 +331,76 @@ Zen-Lead follows Kubernetes security best practices:
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
 - [Examples](examples/) - Example configurations
 
+## 🔄 GitOps Compatibility
+
+Zen-lead generates resources (leader Services and EndpointSlices) that are managed by the controller. To prevent GitOps tools (ArgoCD, Flux) from pruning these resources, configure ignore rules:
+
+### ArgoCD
+
+Add to `Application` spec:
+
+```yaml
+spec:
+  ignoreDifferences:
+  - group: ""
+    kind: Service
+    jsonPointers:
+    - /metadata/labels/app.kubernetes.io~1managed-by
+    - /metadata/annotations/zen-lead.io~1source-service
+  - group: discovery.k8s.io
+    kind: EndpointSlice
+    jsonPointers:
+    - /metadata/labels/endpointslice.kubernetes.io~1managed-by
+```
+
+Or use label selector in `Application`:
+
+```yaml
+spec:
+  syncPolicy:
+    syncOptions:
+    - CreateNamespace=true
+  ignoreApplicationDifferences:
+  - group: ""
+    kind: Service
+    name: "*-leader"
+  - group: discovery.k8s.io
+    kind: EndpointSlice
+    name: "*-leader"
+```
+
+### Flux
+
+Add to `Kustomization` spec:
+
+```yaml
+spec:
+  ignore:
+  - kind: Service
+    name: "*-leader"
+  - kind: EndpointSlice
+    name: "*-leader"
+```
+
+Or use label selector:
+
+```yaml
+spec:
+  ignore:
+  - group: ""
+    kind: Service
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/managed-by: zen-lead
+  - group: discovery.k8s.io
+    kind: EndpointSlice
+    labelSelector:
+      matchLabels:
+        endpointslice.kubernetes.io/managed-by: zen-lead
+```
+
+**Note:** Generated resources are labeled with `app.kubernetes.io/managed-by=zen-lead` and `endpointslice.kubernetes.io/managed-by=zen-lead` for easy identification.
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
