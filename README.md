@@ -229,7 +229,7 @@ kubectl get pod <leader-pod> -o jsonpath='{.spec.containers[*].ports[*].name}'
 **Solutions:**
 1. Ensure container port names match Service targetPort names
 2. Check that leader pod has the named port
-3. Controller falls back to service port if resolution fails
+3. Controller fails closed (no endpoints) if port resolution fails - check events for details
 
 ### Leader Doesn't Change on Failure
 
