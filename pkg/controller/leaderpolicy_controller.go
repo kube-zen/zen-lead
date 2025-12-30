@@ -115,12 +115,12 @@ func (r *LeaderPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					Name:      candidate.Name,
 					UID:       string(candidate.UID),
 					Namespace: candidate.Namespace,
-					StartTime: func() metav1.Time {
-						if lease.Spec.AcquireTime != nil {
-							return *lease.Spec.AcquireTime
-						}
-						return metav1.Time{Time: time.Now()}
-					}(),
+				StartTime: func() metav1.Time {
+					if lease.Spec.AcquireTime != nil {
+						return metav1.NewTime(lease.Spec.AcquireTime.Time)
+					}
+					return metav1.Time{Time: time.Now()}
+				}(),
 				}
 				phase = "Stable"
 
