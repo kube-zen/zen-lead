@@ -21,8 +21,8 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -146,4 +146,3 @@ func GetCurrentRole(pod *corev1.Pod) string {
 
 	return pod.Annotations[AnnotationRole]
 }
-

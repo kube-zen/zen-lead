@@ -31,6 +31,7 @@ import (
 
 	coordinationv1alpha1 "github.com/kube-zen/zen-lead/pkg/apis/coordination.kube-zen.io/v1alpha1"
 	"github.com/kube-zen/zen-lead/pkg/controller"
+	"github.com/kube-zen/zen-lead/pkg/director"
 	"github.com/kube-zen/zen-lead/pkg/pool"
 	//+kubebuilder:scaffold:imports
 )
@@ -98,6 +99,15 @@ func main() {
 		PoolMgr: poolMgr,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "LeaderPolicy")
+		os.Exit(1)
+	}
+
+	// Setup Director controller (traffic routing to leader pods)
+	if err = (&director.DirectorReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Director")
 		os.Exit(1)
 	}
 

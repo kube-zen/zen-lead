@@ -122,4 +122,3 @@ type LeaderPolicyList struct {
 func init() {
 	SchemeBuilder.Register(&LeaderPolicy{}, &LeaderPolicyList{})
 }
-
