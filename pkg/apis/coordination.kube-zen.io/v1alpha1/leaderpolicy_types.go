@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -117,6 +119,22 @@ type LeaderPolicyList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []LeaderPolicy `json:"items"`
+}
+
+// DeepCopyObject is required for runtime.Object interface
+func (in *LeaderPolicy) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopyObject is required for runtime.Object interface
+func (in *LeaderPolicyList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
 }
 
 func init() {
