@@ -120,22 +120,6 @@ type LeaderPolicyList struct {
 	Items           []LeaderPolicy `json:"items"`
 }
 
-// DeepCopyObject is required for runtime.Object interface
-func (in *LeaderPolicy) DeepCopyObject() runtime.Object {
-	if c := in.DeepCopy(); c != nil {
-		return c
-	}
-	return nil
-}
-
-// DeepCopyObject is required for runtime.Object interface
-func (in *LeaderPolicyList) DeepCopyObject() runtime.Object {
-	if c := in.DeepCopy(); c != nil {
-		return c
-	}
-	return nil
-}
-
 func init() {
 	SchemeBuilder.Register(&LeaderPolicy{}, &LeaderPolicyList{})
 }
