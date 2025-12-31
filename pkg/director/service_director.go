@@ -187,7 +187,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		r.updateOptedInServicesCache(ctx, req.Namespace, logger)
 		// Service not found - cleanup leader resources
 		if client.IgnoreNotFound(err) == nil {
-			result, err := r.cleanupLeaderResources //nolint:govet // shadow: intentional reuse(ctx, req.NamespacedName, logger)
+			result, err := r.cleanupLeaderResources(ctx, req.NamespacedName, logger) //nolint:govet // shadow: intentional reuse
 			duration := time.Since(startTime).Seconds()
 			if r.Metrics != nil {
 				r.Metrics.RecordReconciliationDuration(req.Namespace, req.Name, "success", duration)

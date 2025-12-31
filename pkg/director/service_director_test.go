@@ -325,7 +325,7 @@ func TestServiceDirectorReconciler_Reconcile_FailoverMetrics(t *testing.T) {
 
 	// Mark old pod as not ready
 	oldPod.Status.Conditions[0].Status = corev1.ConditionFalse
-	if err := fakeClient.Update //nolint:govet // shadow: intentional reuse(context.Background(), oldPod); err != nil {
+	if err := fakeClient.Update(context.Background(), oldPod); err != nil { //nolint:govet // shadow: intentional reuse
 		t.Fatalf("Failed to update pod: %v", err)
 	}
 
