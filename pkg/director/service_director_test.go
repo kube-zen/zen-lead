@@ -40,13 +40,13 @@ func TestServiceDirectorReconciler_Reconcile_WithMetrics(t *testing.T) {
 	discoveryv1.AddToScheme(scheme)
 
 	tests := []struct {
-		name              string
-		service           *corev1.Service
-		pods              []client.Object
-		expectMetrics     bool
-		expectFailover    bool
-		expectPodsCount   int
-		expectError       bool
+		name            string
+		service         *corev1.Service
+		pods            []client.Object
+		expectMetrics   bool
+		expectFailover  bool
+		expectPodsCount int
+		expectError     bool
 	}{
 		{
 			name: "service with zen-lead enabled and ready pods",
@@ -433,4 +433,3 @@ func TestServiceDirectorReconciler_Reconcile_PortResolutionFailure(t *testing.T)
 	// Note: Due to promauto's global registration, we can't easily verify exact values
 	// The test verifies that RecordPortResolutionFailure was called during reconciliation
 }
-

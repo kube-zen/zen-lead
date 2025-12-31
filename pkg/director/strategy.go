@@ -81,4 +81,3 @@ func DetectStrategyFromObject(obj interface{}) Strategy {
 func ShouldEnableHA(replicas int32) bool {
 	return replicas > 1
 }
-

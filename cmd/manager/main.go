@@ -28,10 +28,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/kube-zen/zen-sdk/pkg/leader"
 	leadershipv1alpha1 "github.com/kube-zen/zen-lead/pkg/apis/leadership.kube-zen.io/v1alpha1"
 	"github.com/kube-zen/zen-lead/pkg/controller"
 	"github.com/kube-zen/zen-lead/pkg/director"
+	"github.com/kube-zen/zen-sdk/pkg/leader"
 )
 
 var (

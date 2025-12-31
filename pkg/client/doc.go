@@ -50,4 +50,3 @@ limitations under the License.
 // If pod name cannot be determined (local development), IsLeader() returns true.
 // This allows local development without Kubernetes.
 package client
-

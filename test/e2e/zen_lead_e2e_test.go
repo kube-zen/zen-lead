@@ -1,3 +1,5 @@
+//go:build e2e
+
 /*
 Copyright 2025 Kube-ZEN Contributors
 
@@ -13,8 +15,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
-//go:build e2e
 
 package e2e
 
@@ -47,26 +47,26 @@ func TestLeaderServiceCreation(t *testing.T) {
 	// 3. Test app deployment
 	// 4. Service annotation
 	// 5. Verification of leader Service and EndpointSlice
-	
+
 	t.Skip("E2E tests require kind cluster setup. See test/e2e/README.md for setup instructions.")
-	
+
 	// TODO: Implement when kind cluster is available
 	// ctx := context.Background()
 	// c := getTestClient(t)
-	// 
+	//
 	// // Create test namespace
 	// ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testNamespace}}
 	// require.NoError(t, c.Create(ctx, ns))
 	// defer c.Delete(ctx, ns)
-	// 
+	//
 	// // Create test Service with annotation
 	// svc := createTestService(ctx, c, testService, testNamespace)
 	// require.NoError(t, c.Create(ctx, svc))
-	// 
+	//
 	// // Wait for leader Service
 	// leaderSvc, err := waitForLeaderService(ctx, c, testService, testNamespace, 30*time.Second)
 	// require.NoError(t, err)
-	// 
+	//
 	// // Verify selector is null
 	// assert.Nil(t, leaderSvc.Spec.Selector)
 	// assert.Equal(t, testService+"-leader", leaderSvc.Name)
@@ -75,7 +75,7 @@ func TestLeaderServiceCreation(t *testing.T) {
 // TestEndpointSliceCreation verifies EndpointSlice is created with exactly one endpoint
 func TestEndpointSliceCreation(t *testing.T) {
 	t.Skip("E2E test placeholder - requires kind cluster")
-	
+
 	// TODO: Implement
 	// Setup: Service annotated, pods Ready
 	// Verify: EndpointSlice exists, has exactly one endpoint, points to leader pod
@@ -84,7 +84,7 @@ func TestEndpointSliceCreation(t *testing.T) {
 // TestFailover verifies failover when leader becomes NotReady
 func TestFailover(t *testing.T) {
 	t.Skip("E2E test placeholder - requires kind cluster")
-	
+
 	// TODO: Implement
 	// Setup: Service annotated, leader pod selected
 	// Action: Mark leader pod NotReady (or delete)
@@ -94,7 +94,7 @@ func TestFailover(t *testing.T) {
 // TestCleanup verifies cleanup when annotation is removed
 func TestCleanup(t *testing.T) {
 	t.Skip("E2E test placeholder - requires kind cluster")
-	
+
 	// TODO: Implement
 	// Setup: Service annotated, leader Service and EndpointSlice exist
 	// Action: Remove annotation
@@ -104,7 +104,7 @@ func TestCleanup(t *testing.T) {
 // TestPortResolutionFailClosed verifies fail-closed behavior when port resolution fails
 func TestPortResolutionFailClosed(t *testing.T) {
 	t.Skip("E2E test placeholder - requires kind cluster")
-	
+
 	// TODO: Implement
 	// Setup: Service with named targetPort that doesn't match pod port name
 	// Verify: No EndpointSlice endpoints, Warning Event emitted, EndpointSlice deleted
@@ -140,7 +140,7 @@ func createTestService(ctx context.Context, c client.Client, name, namespace str
 func waitForLeaderService(ctx context.Context, c client.Client, name, namespace string, timeout time.Duration) (*corev1.Service, error) {
 	leaderServiceName := name + "-leader"
 	key := types.NamespacedName{Name: leaderServiceName, Namespace: namespace}
-	
+
 	var svc corev1.Service
 	err := wait.PollUntilContextTimeout(ctx, 1*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		if err := c.Get(ctx, key, &svc); err != nil {
@@ -152,7 +152,7 @@ func waitForLeaderService(ctx context.Context, c client.Client, name, namespace 
 		}
 		return true, nil
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func waitForLeaderService(ctx context.Context, c client.Client, name, namespace 
 
 func waitForEndpointSlice(ctx context.Context, c client.Client, serviceName, namespace string, timeout time.Duration) (*discoveryv1.EndpointSlice, error) {
 	leaderServiceName := serviceName + "-leader"
-	
+
 	var endpointSlice discoveryv1.EndpointSlice
 	err := wait.PollUntilContextTimeout(ctx, 1*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		sliceList := &discoveryv1.EndpointSliceList{}
@@ -170,25 +170,25 @@ func waitForEndpointSlice(ctx context.Context, c client.Client, serviceName, nam
 		}); err != nil {
 			return false, err
 		}
-		
+
 		if len(sliceList.Items) == 0 {
 			return false, nil // Keep waiting
 		}
-		
+
 		if len(sliceList.Items) > 1 {
 			return false, fmt.Errorf("expected exactly one EndpointSlice, found %d", len(sliceList.Items))
 		}
-		
+
 		endpointSlice = sliceList.Items[0]
-		
+
 		// Verify exactly one endpoint
 		if len(endpointSlice.Endpoints) != 1 {
 			return false, fmt.Errorf("expected exactly one endpoint, found %d", len(endpointSlice.Endpoints))
 		}
-		
+
 		return true, nil
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}

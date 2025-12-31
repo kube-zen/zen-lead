@@ -361,11 +361,9 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			r.Metrics.RecordLeaderDuration(svc.Namespace, svc.Name, duration)
 			r.Metrics.RecordLeaderPodAge(svc.Namespace, svc.Name, duration)
 		}
-	} else {
+	} else if r.Metrics != nil {
 		// No leader - record that service has no endpoints
-		if r.Metrics != nil {
-			r.Metrics.RecordLeaderServiceWithoutEndpoints(svc.Namespace, svc.Name, true)
-		}
+		r.Metrics.RecordLeaderServiceWithoutEndpoints(svc.Namespace, svc.Name, true)
 	}
 
 	duration := time.Since(startTime).Seconds()
@@ -461,8 +459,9 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 	minReadyDuration := r.getMinReadyDuration(svc)
 	now := time.Now()
 
-	for _, pod := range pods {
-		if !isPodReady(&pod) {
+	for i := range pods {
+		pod := &pods[i] //nolint:gocritic // rangeValCopy: using pointer to avoid copy
+		if !isPodReady(pod) {
 			continue
 		}
 
@@ -717,7 +716,8 @@ func (r *ServiceDirectorReconciler) resolveServicePorts(svc *corev1.Service, lea
 
 // resolveNamedPort resolves a named port against a pod's container ports
 func (r *ServiceDirectorReconciler) resolveNamedPort(pod *corev1.Pod, portName string) (int32, error) {
-	for _, container := range pod.Spec.Containers {
+	for i := range pod.Spec.Containers { //nolint:gocritic // rangeValCopy: using index to avoid copy
+		container := &pod.Spec.Containers[i]
 		for _, containerPort := range container.Ports {
 			if containerPort.Name == portName {
 				return containerPort.ContainerPort, nil

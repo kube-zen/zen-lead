@@ -59,9 +59,9 @@ func NewClient(k8sClient client.Client) (*Client, error) {
 	if podName == "" {
 		podName = os.Getenv("HOSTNAME")
 	}
-	
+
 	podUID := os.Getenv("POD_UID")
-	
+
 	return &Client{
 		k8sClient: k8sClient,
 		cache:     make(map[string]cacheEntry),
@@ -126,7 +126,7 @@ func (c *Client) IsLeader(ctx context.Context, poolName string) (bool, error) {
 	isLeader := false
 	if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity != "" {
 		leaderIdentity := *lease.Spec.HolderIdentity
-		
+
 		// Match identity - check if identity matches pod name or pod-name-uid format
 		if c.podName == leaderIdentity ||
 			fmt.Sprintf("%s-%s", c.podName, c.podUID) == leaderIdentity {
@@ -180,7 +180,7 @@ func (c *Client) IsLeaderWithNamespace(ctx context.Context, poolName, namespace 
 	isLeader := false
 	if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity != "" {
 		leaderIdentity := *lease.Spec.HolderIdentity
-		
+
 		// Match identity - check if identity matches pod name or pod-name-uid format
 		if c.podName == leaderIdentity ||
 			fmt.Sprintf("%s-%s", c.podName, c.podUID) == leaderIdentity {
@@ -206,4 +206,3 @@ func (c *Client) ClearCache() {
 	defer c.cacheMu.Unlock()
 	c.cache = make(map[string]cacheEntry)
 }
-

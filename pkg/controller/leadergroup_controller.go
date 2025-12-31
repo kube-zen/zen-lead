@@ -133,7 +133,7 @@ func (r *LeaderGroupReconciler) buildLease(lg *leadershipv1alpha1.LeaderGroup, l
 			Name:      leaseName,
 			Namespace: lg.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "zen-lead",
+				"app.kubernetes.io/managed-by":       "zen-lead",
 				"leadership.kube-zen.io/leadergroup": lg.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
@@ -328,4 +328,3 @@ func statusEqual(a, b leadershipv1alpha1.LeaderGroupStatus) bool {
 	}
 	return true
 }
-

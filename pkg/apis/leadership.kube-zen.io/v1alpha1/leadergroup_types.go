@@ -17,8 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"k8s.io/apimachinery/pkg/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // LeaderGroupType defines the type of leadership group.
@@ -323,4 +323,3 @@ func (in *RoutingSettings) DeepCopyInto(out *RoutingSettings) {
 func init() {
 	SchemeBuilder.Register(&LeaderGroup{}, &LeaderGroupList{})
 }
-
