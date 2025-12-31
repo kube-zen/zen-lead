@@ -255,7 +255,7 @@ func (r *LeaderGroupReconciler) updateStatusFromLease(ctx context.Context, lg *l
 	}
 
 	// Update status if changed
-	if !statusEqual(lg.Status, *status) {
+	if !statusEqual(&lg.Status, status) {
 		lg.Status = *status
 		if err := r.Status().Update(ctx, lg); err != nil {
 			return ctrl.Result{}, err
@@ -305,7 +305,7 @@ func deriveLeaseName(component string) string {
 }
 
 // statusEqual compares two LeaderGroupStatus for equality.
-func statusEqual(a, b leadershipv1alpha1.LeaderGroupStatus) bool {
+func statusEqual(a, b *leadershipv1alpha1.LeaderGroupStatus) bool { //nolint:gocritic // hugeParam: using pointers
 	if a.HolderIdentity != b.HolderIdentity {
 		return false
 	}
