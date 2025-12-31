@@ -203,7 +203,7 @@ Zen-Lead is ready to integrate with:
 - Annotation-based participation
 - Lease-based leader election
 - Status API
-- Pod role management
+- Network-level routing (Profile A)
 
 ✅ **Zen Branding:**
 - All APIs use `coordination.kube-zen.io`
