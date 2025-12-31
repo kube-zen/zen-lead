@@ -459,22 +459,22 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 	minReadyDuration := r.getMinReadyDuration(svc)
 	now := time.Now()
 
-	for i := range pods {
-		pod := &pods[i] //nolint:gocritic // rangeValCopy: using pointer to avoid copy
+	for i := range pods { //nolint:gocritic // rangeValCopy: using index to avoid copy
+		pod := &pods[i]
 		if !isPodReady(pod) {
 			continue
 		}
 
 		// Flap damping - pod must be Ready for at least minReadyDuration
 		if minReadyDuration > 0 {
-			readySince := r.getPodReadySince(&pod)
+			readySince := r.getPodReadySince(pod)
 			if readySince == nil || now.Sub(*readySince) < minReadyDuration {
 				logger.V(4).Info("Pod not ready long enough", "pod", pod.Name, "readySince", readySince, "minDuration", minReadyDuration)
 				continue
 			}
 		}
 
-		readyPods = append(readyPods, pod)
+		readyPods = append(readyPods, *pod)
 	}
 
 	if len(readyPods) == 0 {
