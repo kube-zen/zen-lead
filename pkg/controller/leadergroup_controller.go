@@ -22,7 +22,6 @@ import (
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -151,15 +150,14 @@ func (r *LeaderGroupReconciler) buildLease(lg *leadershipv1alpha1.LeaderGroup, l
 	}
 
 	// Apply lease settings if provided
+	// Note: Lease API only supports LeaseDurationSeconds and LeaseTransitions
+	// RenewDeadline and RetryPeriod are controller-runtime concepts, not Lease fields
 	if lg.Spec.Lease != nil {
 		if lg.Spec.Lease.Duration != nil {
 			leaseDuration := int32(lg.Spec.Lease.Duration.Seconds())
 			lease.Spec.LeaseDurationSeconds = &leaseDuration
 		}
-		if lg.Spec.Lease.RenewDeadline != nil {
-			renewDeadline := int32(lg.Spec.Lease.RenewDeadline.Seconds())
-			lease.Spec.RenewDeadlineSeconds = &renewDeadline
-		}
+		// LeaseTransitions can be used to track retry attempts
 		if lg.Spec.Lease.RetryPeriod != nil {
 			retryPeriod := int32(lg.Spec.Lease.RetryPeriod.Seconds())
 			lease.Spec.LeaseTransitions = &retryPeriod
@@ -211,7 +209,11 @@ func (r *LeaderGroupReconciler) updateStatusFromLease(ctx context.Context, lg *l
 	status := lg.Status.DeepCopy()
 
 	// Update from Lease
-	status.HolderIdentity = lease.Spec.HolderIdentity
+	if lease.Spec.HolderIdentity != nil {
+		status.HolderIdentity = *lease.Spec.HolderIdentity
+	} else {
+		status.HolderIdentity = ""
+	}
 	if lease.Spec.RenewTime != nil {
 		status.RenewTime = &metav1.Time{Time: lease.Spec.RenewTime.Time}
 	}
@@ -219,7 +221,9 @@ func (r *LeaderGroupReconciler) updateStatusFromLease(ctx context.Context, lg *l
 		status.LeaseDurationSeconds = lease.Spec.LeaseDurationSeconds
 	}
 	if lease.Spec.LeaseTransitions != nil {
-		status.FencingToken = lease.Spec.LeaseTransitions
+		// Convert *int32 to *int64 for FencingToken
+		fencingToken := int64(*lease.Spec.LeaseTransitions)
+		status.FencingToken = &fencingToken
 	}
 	status.ObservedLeaseResourceVersion = lease.ResourceVersion
 
@@ -231,7 +235,7 @@ func (r *LeaderGroupReconciler) updateStatusFromLease(ctx context.Context, lg *l
 		Message:            fmt.Sprintf("Lease %q exists", lease.Name),
 		LastTransitionTime: metav1.Now(),
 	}
-	if lease.Spec.HolderIdentity == "" {
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity == "" {
 		condition.Status = metav1.ConditionFalse
 		condition.Reason = "NoHolder"
 		condition.Message = "Lease exists but no holder"
