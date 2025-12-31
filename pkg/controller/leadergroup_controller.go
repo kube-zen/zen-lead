@@ -108,7 +108,7 @@ func (r *LeaderGroupReconciler) reconcileControllerType(ctx context.Context, lg 
 		if apierrors.IsNotFound(err) {
 			// Create Lease
 			lease = r.buildLease(lg, leaseName)
-			if err := r.Create(ctx, lease); err != nil {
+			if err := r.Create(ctx, lease); err != nil { //nolint:govet // shadow: intentional reuse
 				return ctrl.Result{}, fmt.Errorf("failed to create Lease: %w", err)
 			}
 			logger.Info("Created Lease for LeaderGroup", "lease", leaseName)

@@ -187,7 +187,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		r.updateOptedInServicesCache(ctx, req.Namespace, logger)
 		// Service not found - cleanup leader resources
 		if client.IgnoreNotFound(err) == nil {
-			result, err := r.cleanupLeaderResources(ctx, req.NamespacedName, logger)
+			result, err := r.cleanupLeaderResources //nolint:govet // shadow: intentional reuse(ctx, req.NamespacedName, logger)
 			duration := time.Since(startTime).Seconds()
 			if r.Metrics != nil {
 				r.Metrics.RecordReconciliationDuration(req.Namespace, req.Name, "success", duration)
@@ -1132,7 +1132,10 @@ func (r *ServiceDirectorReconciler) mapPodToService(ctx context.Context, obj cli
 
 // mapEndpointSliceToService maps EndpointSlice changes to Service reconciles (for drift detection)
 func (r *ServiceDirectorReconciler) mapEndpointSliceToService(ctx context.Context, obj client.Object) []reconcile.Request {
-	endpointSlice := obj.(*discoveryv1.EndpointSlice)
+	endpointSlice, ok := obj.(*discoveryv1.EndpointSlice) //nolint:errcheck // type assertion is safe in controller-runtime
+	if !ok {
+		return nil
+	}
 
 	// Only process EndpointSlices managed by zen-lead
 	if endpointSlice.Labels == nil || endpointSlice.Labels[LabelEndpointSliceManagedBy] != LabelEndpointSliceManagedByValue {
