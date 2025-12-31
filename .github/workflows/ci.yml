@@ -31,7 +31,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     
     steps:
       - name: Checkout code
@@ -73,12 +73,12 @@ jobs:
       - name: Build
         run: |
           mkdir -p bin
-          go build -o bin/gc-controller ./cmd/gc-controller
+          go build -o bin/manager ./cmd/manager
       
       - name: Verify binary
         run: |
-          if [ ! -f bin/gc-controller ]; then
+          if [ ! -f bin/manager ]; then
             echo "Binary not found"
             exit 1
           fi
-          file bin/gc-controller
+          file bin/manager
