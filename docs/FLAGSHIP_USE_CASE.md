@@ -189,17 +189,19 @@ spec:
 ```
 **Problem**: DNS/kube-proxy load-balances across all pods. No single-active semantics.
 
-### client-go LeaderElection
+### client-go LeaderElection (for controllers)
 ```go
-// Requires modifying application code
+// For controller HA, client-go is verbose
 import "k8s.io/client-go/tools/leaderelection"
-// Application must implement election logic
+// 50+ lines of boilerplate to set up election
 ```
-**Problem**: 
+**Problem for workload routing**: 
 - Requires source code access
 - Doesn't work with vendor binaries
-- Adds 100+ lines of boilerplate
-- Application-specific (can't centralize for platform)
+- Adds 50-100+ lines per application
+- Can't be centralized for platform
+
+**Note**: For **controller** leader election specifically, `zen-sdk/pkg/leader` provides a much simpler interface than client-go (3 lines vs 50+). But for **workload** routing (like our PostgreSQL example), you need zen-lead because you can't modify the application binary.
 
 ### StatefulSet Headless Service
 ```yaml

@@ -20,7 +20,7 @@ Zen-Lead is a **non-invasive leader election controller** for Kubernetes that pr
 
 **Key Differentiation:** Unlike client-go leader election libraries (which require application code changes), zen-lead provides a **network contract** that works for any client, any language, without code changes. Simply annotate a Service and connect to the leader Service endpoint.
 
-**Important:** zen-lead is for **workload leader routing** (selecting which pod receives traffic). For **controller HA** (ensuring only one controller replica runs reconcilers), use controller-runtime's built-in leader election via `zen-sdk/pkg/leader` (which zen-lead itself uses).
+**Important:** zen-lead is for **workload leader routing** (selecting which pod receives traffic). For **controller HA** (ensuring only one controller replica runs reconcilers), use `zen-sdk/pkg/leader` which provides a much simpler interface than client-go's leader election (zen-lead itself uses zen-sdk for its controller HA).
 
 ## 🎯 What Zen-Lead Does
 
