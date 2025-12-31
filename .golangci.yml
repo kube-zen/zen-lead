@@ -11,8 +11,7 @@ linters-settings:
     checks: ["all"]
   staticcheck:
     checks: ["all"]
-  unused:
-    check-exported: true
+  # unused settings removed - no longer supported in latest golangci-lint
   gocritic:
     enabled-tags:
       - performance
