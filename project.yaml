@@ -1,0 +1,7 @@
+projectType: controller
+projectName: zen-lead
+projectDescription: "Kube-ZEN component"
+goVersion: "1.24"
+imageName: "kubezen/zen-lead"
+hasHelmChart: false
+runsRace: true
