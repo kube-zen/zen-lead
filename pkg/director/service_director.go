@@ -252,6 +252,8 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	if len(podList.Items) == 0 {
 		logger.Info("No pods found for service")
+		r.Recorder.Event(svc, corev1.EventTypeWarning, "NoPodsFound",
+			fmt.Sprintf("No pods found matching Service selector. Leader Service %s will have no endpoints until pods are created.", r.getLeaderServiceName(svc)))
 		if err := r.reconcileLeaderService(ctx, svc, nil, logger); err != nil {
 			duration := time.Since(startTime).Seconds()
 			if r.Metrics != nil {
