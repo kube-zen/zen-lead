@@ -104,7 +104,11 @@ golangci-lint run
 
 ## Local Development Overrides
 
-If you need to use a local fork or development version of a dependency during local development, you can use `go.work` (Go workspaces) or temporary `replace` directives in your local `go.mod`. **Do not commit `replace` directives to the main branch** - they make builds non-reproducible.
+**Note**: Currently, `zen-lead` uses a `replace` directive for `zen-sdk` because `zen-sdk` has not yet been published to a public Go module repository. This is a temporary measure until `zen-sdk` is published with proper version tags.
+
+Once `zen-sdk` is published, the `replace` directive will be removed and `zen-lead` will use a proper version reference (e.g., `github.com/kube-zen/zen-sdk v0.1.2-alpha`).
+
+For local development with other dependencies, you can use `go.work` (Go workspaces) or temporary `replace` directives in your local `go.mod`. **Do not commit `replace` directives for dependencies that are available in public repositories** - they make builds non-reproducible.
 
 Example (local only, do not commit):
 ```bash
