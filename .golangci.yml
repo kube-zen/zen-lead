@@ -1,27 +1,10 @@
-linters-settings:
-  gofmt:
-    simplify: true
-  govet:
-    enable:
-      - shadow
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  gosimple:
-    checks: ["all"]
-  staticcheck:
-    checks: ["all"]
-  # unused settings removed - no longer supported in latest golangci-lint
-  gocritic:
-    enabled-tags:
-      - performance
-      - diagnostic
-    disabled-checks:
-      - dupImport
-      - ifElseChain
-      - octalLiteral
-      - whyNoLint
-      - wrapperFunc
+# golangci-lint configuration for zen-lead
+# Updated to remove deprecated options
+
+run:
+  timeout: 5m
+  tests: true
+  go: "1.24"
 
 linters:
   enable:
@@ -35,11 +18,46 @@ linters:
     - goimports
     - gocritic
 
+linters-settings:
+  gofmt:
+    simplify: true
+  
+  govet:
+    enable:
+      - shadow
+  
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  
+  gosimple:
+    checks: ["all"]
+  
+  staticcheck:
+    checks: ["all"]
+  
+  gocritic:
+    enabled-tags:
+      - performance
+      - diagnostic
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+      - wrapperFunc
+
 issues:
   exclude-rules:
-    - path: _test.go
+    - path: _test\.go
       linters:
         - errcheck
         - gocritic
   max-issues-per-linter: 0
   max-same-issues: 0
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
