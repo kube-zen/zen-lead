@@ -80,8 +80,8 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 	}
 
-	// Apply mandatory leader election (always enabled for HA safety)
-	leader.ApplyRequiredLeaderElection(&mgrOpts, "zen-lead-controller", leaderElectionNS, leaderElectionID)
+	// Apply leader election (mandatory for zen-lead - always enabled, no option to disable)
+	leader.ApplyLeaderElection(&mgrOpts, "zen-lead-controller", leaderElectionNS, leaderElectionID, true)
 
 	mgr, err := ctrl.NewManager(restConfig, mgrOpts)
 	if err != nil {
