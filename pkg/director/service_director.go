@@ -478,6 +478,9 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 
 	if len(readyPods) == 0 {
 		logger.Info("No ready pods found for service")
+		// Emit event for no ready pods scenario
+		r.Recorder.Event(svc, corev1.EventTypeWarning, "NoReadyPods",
+			fmt.Sprintf("No ready pods available for leader selection. Leader Service %s will have no endpoints until at least one pod becomes Ready.", r.getLeaderServiceName(svc)))
 		return nil
 	}
 

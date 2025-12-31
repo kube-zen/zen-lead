@@ -211,6 +211,9 @@ kubectl get endpointslice -l kubernetes.io/service-name=<service>-leader
 # Check if any pods are Ready
 kubectl get pods -l <selector> --field-selector=status.phase=Running
 
+# Check events for "NoReadyPods" or "NoPodsFound"
+kubectl get events --field-selector involvedObject.name=<service> --sort-by='.lastTimestamp'
+
 # Check controller logs
 kubectl logs -l app.kubernetes.io/name=zen-lead --tail=100
 ```
@@ -219,6 +222,42 @@ kubectl logs -l app.kubernetes.io/name=zen-lead --tail=100
 1. Ensure at least one pod is Ready (check readiness probe)
 2. Verify Service has a selector
 3. Check controller logs for errors
+4. Check Kubernetes Events for `NoReadyPods` or `NoPodsFound` warnings
+
+### Check Leader Identity
+
+```bash
+# Describe leader Service to see current leader
+kubectl describe service <service>-leader
+
+# Get leader pod name
+kubectl get service <service>-leader -o jsonpath='{.metadata.annotations.zen-lead\.io/leader-pod-name}'
+
+# Get last leader switch time
+kubectl get service <service>-leader -o jsonpath='{.metadata.annotations.zen-lead\.io/leader-last-switch-time}'
+```
+
+### Using Wrong Service (Common Mistake)
+
+**Problem:** Application connects to source Service (`my-app`) instead of leader Service (`my-app-leader`).
+
+**Symptom:** Traffic goes to all pods instead of just the leader.
+
+**Solution:** Update application configuration to use `<service-name>-leader`:
+
+```yaml
+# Wrong
+env:
+- name: SERVICE_NAME
+  value: my-app  # Routes to all pods
+
+# Correct
+env:
+- name: SERVICE_NAME
+  value: my-app-leader  # Routes to leader only
+```
+
+See [INTEGRATION.md](docs/INTEGRATION.md#migration-from-wrong-service-usage) for detailed migration patterns.
 
 ### Port Resolution Fails
 

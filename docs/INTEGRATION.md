@@ -216,6 +216,27 @@ kubectl get service my-app-leader -o jsonpath='{.spec.selector}'
 # Should return: null
 ```
 
+### Check Leader Identity
+
+```bash
+# Describe leader Service to see leader annotations
+kubectl describe service my-app-leader
+
+# Output includes:
+# Annotations:  zen-lead.io/leader-pod-name: my-app-abc123
+#               zen-lead.io/leader-pod-uid: 12345678-1234-1234-1234-123456789abc
+#               zen-lead.io/leader-last-switch-time: 2025-12-31T12:00:00Z
+
+# Get leader pod name directly
+kubectl get service my-app-leader -o jsonpath='{.metadata.annotations.zen-lead\.io/leader-pod-name}'
+
+# Get leader pod UID
+kubectl get service my-app-leader -o jsonpath='{.metadata.annotations.zen-lead\.io/leader-pod-uid}'
+
+# Get last switch time
+kubectl get service my-app-leader -o jsonpath='{.metadata.annotations.zen-lead\.io/leader-last-switch-time}'
+```
+
 ### Check EndpointSlice
 
 ```bash
@@ -227,17 +248,122 @@ kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -o jsonpat
 # Should show exactly one IP (leader pod)
 ```
 
+### Check Events
+
+```bash
+# View events for the source Service
+kubectl get events --field-selector involvedObject.name=my-app --sort-by='.lastTimestamp'
+
+# Common events:
+# - LeaderServiceCreated: Leader service was created
+# - LeaderRoutingAvailable: Leader routing is available
+# - LeaderChanged: Leader pod changed
+# - PortResolutionFailed: Port resolution failed (fail-closed)
+# - NoReadyPods: No ready pods available
+# - NoPodsFound: No pods found matching selector
+```
+
 ### Test Failover
 
 ```bash
 # Get current leader pod
 kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -o jsonpath='{.items[*].endpoints[*].targetRef.name}'
 
+# Or use leader Service annotation
+kubectl get service my-app-leader -o jsonpath='{.metadata.annotations.zen-lead\.io/leader-pod-name}'
+
 # Delete leader pod
 kubectl delete pod <leader-pod-name>
 
 # Watch for new leader
 kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -w
+
+# Or watch events
+kubectl get events --field-selector involvedObject.name=my-app -w
+```
+
+## Migration from Wrong Service Usage
+
+### Problem: Using Source Service Instead of Leader Service
+
+**Symptom:** Application connects to `my-app` instead of `my-app-leader`, receiving traffic from all pods instead of just the leader.
+
+**Solution:** Update application configuration to use the leader Service.
+
+### Migration Pattern 1: Environment Variable
+
+```yaml
+# Before (wrong - uses all pods)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-client
+spec:
+  template:
+    spec:
+      containers:
+      - name: client
+        env:
+        - name: SERVICE_NAME
+          value: my-app  # ❌ Wrong - routes to all pods
+---
+# After (correct - uses leader only)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-client
+spec:
+  template:
+    spec:
+      containers:
+      - name: client
+        env:
+        - name: SERVICE_NAME
+          value: my-app-leader  # ✅ Correct - routes to leader only
+```
+
+### Migration Pattern 2: ConfigMap
+
+```yaml
+# Before (wrong)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  service-name: my-app  # ❌ Wrong
+---
+# After (correct)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  service-name: my-app-leader  # ✅ Correct
+```
+
+### Migration Pattern 3: Service Discovery
+
+```yaml
+# Application code change
+# Before: my-app.default.svc.cluster.local
+# After:  my-app-leader.default.svc.cluster.local
+```
+
+### Verification After Migration
+
+```bash
+# Verify client is connecting to leader Service
+# Check DNS resolution (from client pod)
+kubectl exec -it <client-pod> -- nslookup my-app-leader
+
+# Verify only one endpoint (leader pod)
+kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -o jsonpath='{.items[*].endpoints[*].addresses}'
+# Should show exactly one IP
+
+# Compare with source Service (should show multiple IPs)
+kubectl get endpointslice -l kubernetes.io/service-name=my-app -o jsonpath='{.items[*].endpoints[*].addresses}'
+# Should show multiple IPs (all pods)
 ```
 
 ## Troubleshooting
