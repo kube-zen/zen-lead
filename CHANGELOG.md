@@ -14,11 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Added
 
 **Core Features:**
-- **LeaderPolicy CRD**: Defines pools of candidates for leader election
-- **Annotation-based participation**: Pods join pools via annotations (no code changes)
-- **Automatic leader election**: Uses Kubernetes Lease API
-- **Status API**: LeaderPolicy status shows current leader and candidates
-- **Pod role annotations**: Automatically sets `zen-lead/role: leader` or `follower`
+- **Service annotation opt-in**: Annotate Services with `zen-lead.io/enabled: "true"` (Profile A)
+- **Network-level routing**: Creates selector-less leader Service + EndpointSlice
+- **Automatic leader election**: Uses Kubernetes Lease API (Profile B/C)
+- **No pod mutation**: Day-0 contract - zen-lead never mutates workload pods
+- **CRD-free default**: Profile A works without CRDs (Profile C is opt-in)
 
 **Components:**
 - LeaderPolicy controller for reconciliation

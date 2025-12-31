@@ -99,10 +99,11 @@ Zen-Lead is a complete High Availability standardization solution for Kubernetes
 - Candidate count tracking
 - Phase tracking (Electing/Stable)
 
-### 4. Pod Role Management ✅
-- Automatically sets `zen-lead/role: leader` or `follower`
-- Applications can check annotation
-- Thread-safe updates
+### 4. Network-Level Routing (Profile A) ✅
+- Creates selector-less `<service-name>-leader` Service
+- Manages EndpointSlice pointing to exactly one leader pod
+- No pod mutation - Day-0 contract guarantee
+- Applications connect to leader Service endpoint
 
 ### 5. Zen Branding ✅
 - All APIs use `coordination.kube-zen.io` group
