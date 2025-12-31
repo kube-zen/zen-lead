@@ -1100,7 +1100,10 @@ func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // mapPodToService maps Pod changes to Service reconciles (for failover detection)
 // Uses cache/index for efficient pod-to-service mapping
 func (r *ServiceDirectorReconciler) mapPodToService(ctx context.Context, obj client.Object) []reconcile.Request {
-	pod := obj.(*corev1.Pod)
+	pod, ok := obj.(*corev1.Pod) //nolint:errcheck // type assertion is safe in controller-runtime
+	if !ok {
+		return nil
+	}
 
 	// Use cache to only check opted-in Services in this namespace
 	cachedServices := r.optedInServicesCache[pod.Namespace]
@@ -1180,7 +1183,8 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 }
 
 // updateOptedInServicesCacheForService updates cache for a single Service
-func (r *ServiceDirectorReconciler) updateOptedInServicesCacheForService(svc *corev1.Service, logger klog.Logger) {
+func (r *ServiceDirectorReconciler) updateOptedInServicesCacheForService(svc *corev1.Service, logger klog.Logger) { //nolint:unused // reserved for future use
+
 	if svc.Annotations == nil || svc.Annotations[AnnotationEnabledService] != "true" {
 		// Not opted in - remove from cache if present
 		cached := r.optedInServicesCache[svc.Namespace]

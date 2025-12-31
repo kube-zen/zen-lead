@@ -21,7 +21,7 @@ import (
 )
 
 // resetGlobalRecorder resets the global recorder for testing
-func resetGlobalRecorder() {
+func resetGlobalRecorder() { //nolint:unused // used in tests
 	globalRecorder = nil
 }
 
