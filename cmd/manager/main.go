@@ -29,6 +29,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/kube-zen/zen-sdk/pkg/leader"
+	leadershipv1alpha1 "github.com/kube-zen/zen-lead/pkg/apis/leadership.kube-zen.io/v1alpha1"
+	"github.com/kube-zen/zen-lead/pkg/controller"
 	"github.com/kube-zen/zen-lead/pkg/director"
 )
 
@@ -39,6 +41,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(leadershipv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -46,11 +49,14 @@ func main() {
 	var metricsAddr string
 	var leaderElectionID string
 	var probeAddr string
+	var enableLeaderGroups bool
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&leaderElectionID, "leader-election-id", "zen-lead-controller-leader-election",
 		"The ID for leader election. Must be unique per controller instance in the same namespace.")
+	flag.BoolVar(&enableLeaderGroups, "enable-leader-groups", false,
+		"Enable LeaderGroup CRD support (Profile C). Default: false (Profile A only, CRD-free).")
 
 	opts := zap.Options{
 		Development: true,
@@ -91,13 +97,30 @@ func main() {
 
 	// Setup Service Director controller (traffic routing to leader pods)
 	// Non-invasive Service-based approach: watches Services with zen-lead.io/enabled annotation
+	// This is Profile A (network-only, CRD-free) - always enabled
 	eventRecorder := mgr.GetEventRecorderFor("zen-lead-controller")
 	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder)
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ServiceDirector")
 		os.Exit(1)
 	}
-	setupLog.Info("Service Director controller enabled")
+	setupLog.Info("Service Director controller enabled (Profile A: network-only)")
+
+	// Setup LeaderGroup controller (Profile C: CRD-driven controller HA)
+	// This is optional and disabled by default to maintain Day-0 CRD-free contract
+	if enableLeaderGroups {
+		leadergroupReconciler := &controller.LeaderGroupReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+		}
+		if err = leadergroupReconciler.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "LeaderGroup")
+			os.Exit(1)
+		}
+		setupLog.Info("LeaderGroup controller enabled (Profile C: CRD-driven)")
+	} else {
+		setupLog.Info("LeaderGroup controller disabled (Profile A only, CRD-free)")
+	}
 
 	// Setup health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

@@ -33,3 +33,14 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
+  
+  # LeaderGroup CRD (optional, Profile C only - enabled via --enable-leader-groups flag)
+  - apiGroups: ["leadership.kube-zen.io"]
+    resources: ["leadergroups"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["leadership.kube-zen.io"]
+    resources: ["leadergroups/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["leadership.kube-zen.io"]
+    resources: ["leadergroups/finalizers"]
+    verbs: ["update"]
