@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/kube-zen/zen-lead/pkg/metrics"
+	sdklog "github.com/kube-zen/zen-sdk/pkg/logging"
 )
 
 const (
@@ -177,8 +177,10 @@ func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, 
 // Reconcile reconciles a Service with zen-lead.io/enabled annotation
 func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	startTime := time.Now()
-	logger := klog.FromContext(ctx)
-	logger = logger.WithValues("service", req.NamespacedName)
+	logger := sdklog.NewLogger("zen-lead-service-director").WithContext(ctx).WithFields(map[string]interface{}{
+		"namespace": req.Namespace,
+		"name":      req.Name,
+	})
 
 	// Fetch the Service
 	svc := &corev1.Service{}
@@ -215,7 +217,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Validate Service has selector (required for finding pods)
 	if len(svc.Spec.Selector) == 0 {
-		logger.Info("Service has no selector, skipping", "service", svc.Name)
+		logger.Info("Service has no selector, skipping", sdklog.Operation("validate_service"), sdklog.String("service", svc.Name))
 		r.Recorder.Event(svc, corev1.EventTypeWarning, "InvalidService",
 			"Service must have a selector to use zen-lead")
 		duration := time.Since(startTime).Seconds()
@@ -225,12 +227,12 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	logger = logger.WithValues("service", svc.Name, "namespace", svc.Namespace)
+	logger = logger.WithField("service", svc.Name).WithField("namespace", svc.Namespace)
 
 	// Find pods matching the Service selector
 	podList := &corev1.PodList{}
 	if err := r.List(ctx, podList, client.InNamespace(svc.Namespace), client.MatchingLabels(svc.Spec.Selector)); err != nil {
-		logger.Error(err, "Failed to list pods for service")
+		logger.Error(err, "Failed to list pods for service", sdklog.Operation("list_pods"), sdklog.ErrorCode("LIST_PODS_FAILED"))
 		duration := time.Since(startTime).Seconds()
 		if r.Metrics != nil {
 			r.Metrics.RecordReconciliationDuration(svc.Namespace, svc.Name, "error", duration)
@@ -251,7 +253,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	if len(podList.Items) == 0 {
-		logger.Info("No pods found for service")
+		logger.Info("No pods found for service", sdklog.Operation("reconcile"))
 		r.Recorder.Event(svc, corev1.EventTypeWarning, "NoPodsFound",
 			fmt.Sprintf("No pods found matching Service selector. Leader Service %s will have no endpoints until pods are created.", r.getLeaderServiceName(svc)))
 		if err := r.reconcileLeaderService(ctx, svc, nil, logger); err != nil {
@@ -279,11 +281,12 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if currentLeaderPod.DeletionTimestamp != nil ||
 			!isPodReady(currentLeaderPod) ||
 			currentLeaderPod.Status.PodIP == "" {
-			logger.Info("Current leader unhealthy, triggering immediate failover",
-				"leader", currentLeaderPod.Name,
-				"terminating", currentLeaderPod.DeletionTimestamp != nil,
-				"ready", isPodReady(currentLeaderPod),
-				"hasIP", currentLeaderPod.Status.PodIP != "")
+		logger.Info("Current leader unhealthy, triggering immediate failover",
+			sdklog.Operation("failover"),
+			sdklog.String("leader", currentLeaderPod.Name),
+			sdklog.Bool("terminating", currentLeaderPod.DeletionTimestamp != nil),
+			sdklog.Bool("ready", isPodReady(currentLeaderPod)),
+			sdklog.Bool("hasIP", currentLeaderPod.Status.PodIP != ""))
 			// Force new leader selection (bypass stickiness)
 			bypassStickiness = true
 			currentLeaderPod = nil
@@ -311,17 +314,18 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	if leaderChanged {
-		logger.Info("Leader changed", "old_leader", func() string {
-			if currentLeaderPod != nil {
-				return currentLeaderPod.Name
-			}
-			return "none"
-		}(), "new_leader", func() string {
-			if leaderPod != nil {
-				return leaderPod.Name
-			}
-			return "none"
-		}())
+		oldLeader := "none"
+		if currentLeaderPod != nil {
+			oldLeader = currentLeaderPod.Name
+		}
+		newLeader := "none"
+		if leaderPod != nil {
+			newLeader = leaderPod.Name
+		}
+		logger.Info("Leader changed",
+			sdklog.Operation("leader_change"),
+			sdklog.String("old_leader", oldLeader),
+			sdklog.String("new_leader", newLeader))
 		if r.Metrics != nil {
 			// Record failover with reason
 			reason := "noneReady"
@@ -342,7 +346,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Reconcile leader Service and EndpointSlice
 	if err := r.reconcileLeaderService(ctx, svc, leaderPod, logger); err != nil {
-		logger.Error(err, "Failed to reconcile leader service")
+		logger.Error(err, "Failed to reconcile leader service", sdklog.Operation("reconcile_service"), sdklog.ErrorCode("RECONCILE_SERVICE_FAILED"))
 		duration := time.Since(startTime).Seconds()
 		if r.Metrics != nil {
 			r.Metrics.RecordReconciliationDuration(svc.Namespace, svc.Name, "error", duration)
@@ -374,7 +378,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 // getCurrentLeaderPod gets the current leader pod from the EndpointSlice (if it exists)
-func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc *corev1.Service, logger klog.Logger) *corev1.Pod {
+func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc *corev1.Service, logger *sdklog.Logger) *corev1.Pod {
 	leaderServiceName := r.getLeaderServiceName(svc)
 	endpointSlice := &discoveryv1.EndpointSlice{}
 	endpointSliceKey := types.NamespacedName{
@@ -408,7 +412,7 @@ func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc
 
 // selectLeaderPod selects the leader pod using controller-driven selection with stickiness
 // bypassStickiness: if true, forces new leader selection even if current leader exists (leader-fast-path)
-func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *corev1.Service, pods []corev1.Pod, bypassStickiness bool, logger klog.Logger) *corev1.Pod {
+func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *corev1.Service, pods []corev1.Pod, bypassStickiness bool, logger *sdklog.Logger) *corev1.Pod {
 	// Check if sticky is enabled (default: true)
 	sticky := true
 	if svc.Annotations != nil {
@@ -436,7 +440,7 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 						pod := &pods[i]
 						if string(pod.UID) == string(endpoint.TargetRef.UID) {
 							if isPodReady(pod) {
-								logger.V(4).Info("Keeping sticky leader", "pod", pod.Name, "uid", pod.UID)
+								logger.Debug("Keeping sticky leader", sdklog.String("pod", pod.Name), sdklog.String("uid", string(pod.UID)))
 								if r.Metrics != nil {
 									r.Metrics.RecordStickyLeaderHit(svc.Namespace, svc.Name)
 								}
@@ -469,7 +473,10 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 		if minReadyDuration > 0 {
 			readySince := r.getPodReadySince(pod)
 			if readySince == nil || now.Sub(*readySince) < minReadyDuration {
-				logger.V(4).Info("Pod not ready long enough", "pod", pod.Name, "readySince", readySince, "minDuration", minReadyDuration)
+				logger.Debug("Pod not ready long enough",
+					sdklog.String("pod", pod.Name),
+					sdklog.String("readySince", readySince.String()),
+					sdklog.Int64("minDuration", int64(minReadyDuration.Seconds())))
 				continue
 			}
 		}
@@ -478,7 +485,7 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 	}
 
 	if len(readyPods) == 0 {
-		logger.Info("No ready pods found for service")
+		logger.Info("No ready pods found for service", sdklog.Operation("select_leader"))
 		// Emit event for no ready pods scenario
 		r.Recorder.Event(svc, corev1.EventTypeWarning, "NoReadyPods",
 			fmt.Sprintf("No ready pods available for leader selection. Leader Service %s will have no endpoints until at least one pod becomes Ready.", r.getLeaderServiceName(svc)))
@@ -495,12 +502,12 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 
 	// Return oldest Ready pod
 	leaderPod := &readyPods[0]
-	logger.Info("Selected new leader pod", "pod", leaderPod.Name)
+	logger.Info("Selected new leader pod", sdklog.Operation("select_leader"), sdklog.String("pod", leaderPod.Name))
 	return leaderPod
 }
 
 // reconcileLeaderService creates or updates the selector-less leader Service and EndpointSlice
-func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, svc *corev1.Service, leaderPod *corev1.Pod, logger klog.Logger) error {
+func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, svc *corev1.Service, leaderPod *corev1.Pod, logger *sdklog.Logger) error {
 	leaderServiceName := r.getLeaderServiceName(svc)
 
 	// Create or update selector-less leader Service
@@ -513,7 +520,7 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 	// Resolve ports (handle named targetPort) - fail-closed
 	leaderPorts, err := r.resolveServicePorts(svc, leaderPod)
 	if err != nil {
-		logger.Error(err, "Failed to resolve service ports", "error", err)
+		logger.Error(err, "Failed to resolve service ports", sdklog.Operation("resolve_ports"), sdklog.ErrorCode("PORT_RESOLUTION_FAILED"))
 		r.Recorder.Event(svc, corev1.EventTypeWarning, "PortResolutionFailed", err.Error())
 		// Fail-closed: if port resolution fails, don't create/update EndpointSlice
 		// Delete existing EndpointSlice if it exists (clean failure mode)
@@ -594,7 +601,7 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 		if err := r.Create(ctx, leaderService); err != nil {
 			return fmt.Errorf("failed to create leader service: %w", err)
 		}
-		logger.Info("Created selector-less leader service", "service", leaderServiceName)
+		logger.Info("Created selector-less leader service", sdklog.Operation("create_service"), sdklog.String("service", leaderServiceName))
 		r.Recorder.Event(svc, corev1.EventTypeNormal, "LeaderServiceCreated",
 			fmt.Sprintf("Created leader service %s. Leader routing available at %s", leaderServiceName, leaderServiceName))
 
@@ -728,7 +735,7 @@ func (r *ServiceDirectorReconciler) resolveNamedPort(pod *corev1.Pod, portName s
 }
 
 // reconcileEndpointSlice creates or updates EndpointSlice pointing to leader pod
-func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, svc *corev1.Service, leaderServiceName string, leaderPod *corev1.Pod, servicePorts []corev1.ServicePort, logger klog.Logger) error {
+func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, svc *corev1.Service, leaderServiceName string, leaderPod *corev1.Pod, servicePorts []corev1.ServicePort, logger *sdklog.Logger) error {
 	endpointSliceName := leaderServiceName
 	endpointSlice := &discoveryv1.EndpointSlice{}
 	endpointSliceKey := types.NamespacedName{
@@ -865,12 +872,14 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 			}
 			return fmt.Errorf("failed to create endpoint slice: %w", err)
 		}
-		logger.Info("Created endpoint slice for leader pod", "endpointslice", endpointSliceName, "pod", func() string {
-			if leaderPod != nil {
-				return leaderPod.Name
-			}
-			return "none"
-		}())
+		podName := "none"
+		if leaderPod != nil {
+			podName = leaderPod.Name
+		}
+		logger.Info("Created endpoint slice for leader pod",
+			sdklog.Operation("create_endpointslice"),
+			sdklog.String("endpointslice", endpointSliceName),
+			sdklog.String("pod", podName))
 
 		// Update total EndpointSlices metric
 		if r.Metrics != nil {
@@ -893,17 +902,18 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 		return fmt.Errorf("failed to patch endpoint slice: %w", err)
 	}
 
-	logger.V(4).Info("Updated endpoint slice for leader pod", "endpointslice", endpointSliceName, "pod", func() string {
-		if leaderPod != nil {
-			return leaderPod.Name
-		}
-		return "none"
-	}())
+	podName := "none"
+	if leaderPod != nil {
+		podName = leaderPod.Name
+	}
+	logger.Debug("Updated endpoint slice for leader pod",
+		sdklog.String("endpointslice", endpointSliceName),
+		sdklog.String("pod", podName))
 	return nil
 }
 
 // updateResourceTotals updates the total count metrics for leader Services and EndpointSlices
-func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, namespace string, logger klog.Logger) {
+func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, namespace string, logger *sdklog.Logger) {
 	if r.Metrics == nil {
 		return
 	}
@@ -915,7 +925,7 @@ func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, na
 	}); err == nil {
 		r.Metrics.RecordLeaderServicesTotal(namespace, len(leaderServiceList.Items))
 	} else {
-		logger.V(4).Info("Failed to list leader services for metrics", "error", err)
+		logger.Debug("Failed to list leader services for metrics", sdklog.String("error", err.Error()))
 	}
 
 	// Count EndpointSlices (with zen-lead managed-by label)
@@ -925,12 +935,12 @@ func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, na
 	}); err == nil {
 		r.Metrics.RecordEndpointSlicesTotal(namespace, len(endpointSliceList.Items))
 	} else {
-		logger.V(4).Info("Failed to list endpoint slices for metrics", "error", err)
+		logger.Debug("Failed to list endpoint slices for metrics", sdklog.String("error", err.Error()))
 	}
 }
 
 // cleanupLeaderResources removes leader Service and EndpointSlice when annotation is removed
-func (r *ServiceDirectorReconciler) cleanupLeaderResources(ctx context.Context, svcName types.NamespacedName, logger klog.Logger) (ctrl.Result, error) {
+func (r *ServiceDirectorReconciler) cleanupLeaderResources(ctx context.Context, svcName types.NamespacedName, logger *sdklog.Logger) (ctrl.Result, error) {
 	// Try to determine leader service name (best effort)
 	svc := &corev1.Service{}
 	if err := r.Get(ctx, svcName, svc); err == nil {
@@ -944,10 +954,10 @@ func (r *ServiceDirectorReconciler) cleanupLeaderResources(ctx context.Context, 
 		leaderService := &corev1.Service{}
 		if err := r.Get(ctx, leaderServiceKey, leaderService); err == nil {
 			if err := r.Delete(ctx, leaderService); err != nil {
-				logger.Error(err, "Failed to delete leader service", "service", leaderServiceName)
+				logger.Error(err, "Failed to delete leader service", sdklog.String("service", leaderServiceName))
 				return ctrl.Result{}, err
 			}
-			logger.Info("Deleted leader service", "service", leaderServiceName)
+			logger.Info("Deleted leader service", sdklog.Operation("delete_service"), sdklog.String("service", leaderServiceName))
 		}
 	} else {
 		// Service doesn't exist - try to find and delete leader service by label
@@ -958,7 +968,7 @@ func (r *ServiceDirectorReconciler) cleanupLeaderResources(ctx context.Context, 
 		}); err == nil {
 			for i := range leaderServiceList.Items {
 				if err := r.Delete(ctx, &leaderServiceList.Items[i]); err != nil {
-					logger.Error(err, "Failed to delete leader service", "service", leaderServiceList.Items[i].Name)
+					logger.Error(err, "Failed to delete leader service", sdklog.Operation("delete_service"), sdklog.ErrorCode("DELETE_SERVICE_FAILED"), sdklog.String("service", leaderServiceList.Items[i].Name))
 				}
 			}
 		}
@@ -1109,7 +1119,7 @@ func (r *ServiceDirectorReconciler) mapPodToService(ctx context.Context, obj cli
 	cachedServices := r.optedInServicesCache[pod.Namespace]
 	if len(cachedServices) == 0 {
 		// Cache miss - refresh cache for this namespace
-		logger := klog.FromContext(ctx)
+		logger := sdklog.NewLogger("zen-lead-service-director").WithContext(ctx)
 		r.updateOptedInServicesCache(ctx, pod.Namespace, logger)
 		cachedServices = r.optedInServicesCache[pod.Namespace]
 	}
@@ -1159,10 +1169,10 @@ func (r *ServiceDirectorReconciler) mapEndpointSliceToService(ctx context.Contex
 }
 
 // updateOptedInServicesCache updates the cache for a specific namespace
-func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Context, namespace string, logger klog.Logger) {
+func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Context, namespace string, logger *sdklog.Logger) {
 	serviceList := &corev1.ServiceList{}
 	if err := r.List(ctx, serviceList, client.InNamespace(namespace)); err != nil {
-		logger.V(4).Info("Failed to list services for cache update", "error", err)
+		logger.Debug("Failed to list services for cache update", sdklog.String("error", err.Error()))
 		return
 	}
 
@@ -1186,7 +1196,7 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 }
 
 // updateOptedInServicesCacheForService updates cache for a single Service
-func (r *ServiceDirectorReconciler) updateOptedInServicesCacheForService(svc *corev1.Service, logger klog.Logger) { //nolint:unused // reserved for future use
+func (r *ServiceDirectorReconciler) updateOptedInServicesCacheForService(svc *corev1.Service, logger *sdklog.Logger) { //nolint:unused // reserved for future use
 
 	if svc.Annotations == nil || svc.Annotations[AnnotationEnabledService] != "true" {
 		// Not opted in - remove from cache if present

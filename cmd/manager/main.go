@@ -25,18 +25,19 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	leadershipv1alpha1 "github.com/kube-zen/zen-lead/pkg/apis/leadership.kube-zen.io/v1alpha1"
 	"github.com/kube-zen/zen-lead/pkg/controller"
 	"github.com/kube-zen/zen-lead/pkg/director"
 	"github.com/kube-zen/zen-sdk/pkg/leader"
+	sdklog "github.com/kube-zen/zen-sdk/pkg/logging"
 )
 
 var (
 	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
+	logger   *sdklog.Logger
+	setupLog *sdklog.Logger
 )
 
 func init() {
@@ -58,18 +59,19 @@ func main() {
 	flag.BoolVar(&enableLeaderGroups, "enable-leader-groups", false,
 		"Enable LeaderGroup CRD support (Profile C). Default: false (Profile A only, CRD-free).")
 
-	opts := zap.Options{
-		Development: true,
-	}
-	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	// Initialize zen-sdk logger (configures controller-runtime logger automatically)
+	logger = sdklog.NewLogger("zen-lead")
+	setupLog = logger.WithComponent("setup")
+
+	// OpenTelemetry tracing initialization can be added here when zen-sdk/pkg/observability is available
+	// For now, continue without tracing
 
 	// Get pod namespace (required for leader election)
 	leaderElectionNS, err := leader.RequirePodNamespace()
 	if err != nil {
-		setupLog.Error(err, "failed to determine pod namespace for leader election")
+		setupLog.Error(err, "failed to determine pod namespace for leader election", sdklog.ErrorCode("LEADER_ELECTION_ERROR"))
 		os.Exit(1)
 	}
 
@@ -91,7 +93,7 @@ func main() {
 
 	mgr, err := ctrl.NewManager(restConfig, mgrOpts)
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to start manager", sdklog.ErrorCode("MANAGER_INIT_ERROR"))
 		os.Exit(1)
 	}
 
@@ -101,10 +103,10 @@ func main() {
 	eventRecorder := mgr.GetEventRecorderFor("zen-lead-controller")
 	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder)
 	if err = reconciler.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ServiceDirector")
+		setupLog.Error(err, "unable to create controller", sdklog.Component("ServiceDirector"), sdklog.ErrorCode("CONTROLLER_SETUP_ERROR"))
 		os.Exit(1)
 	}
-	setupLog.Info("Service Director controller enabled (Profile A: network-only)")
+	setupLog.Info("Service Director controller enabled (Profile A: network-only)", sdklog.Component("ServiceDirector"))
 
 	// Setup LeaderGroup controller (Profile C: CRD-driven controller HA)
 	// This is optional and disabled by default to maintain Day-0 CRD-free contract
@@ -114,28 +116,28 @@ func main() {
 			Scheme: mgr.GetScheme(),
 		}
 		if err = leadergroupReconciler.SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "LeaderGroup")
+			setupLog.Error(err, "unable to create controller", sdklog.Component("LeaderGroup"), sdklog.ErrorCode("CONTROLLER_SETUP_ERROR"))
 			os.Exit(1)
 		}
-		setupLog.Info("LeaderGroup controller enabled (Profile C: CRD-driven)")
+		setupLog.Info("LeaderGroup controller enabled (Profile C: CRD-driven)", sdklog.Component("LeaderGroup"))
 	} else {
-		setupLog.Info("LeaderGroup controller disabled (Profile A only, CRD-free)")
+		setupLog.Info("LeaderGroup controller disabled (Profile A only, CRD-free)", sdklog.Component("LeaderGroup"))
 	}
 
 	// Setup health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
+		setupLog.Error(err, "unable to set up health check", sdklog.ErrorCode("HEALTH_CHECK_ERROR"))
 		os.Exit(1)
 	}
 
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+		setupLog.Error(err, "unable to set up ready check", sdklog.ErrorCode("READY_CHECK_ERROR"))
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
+	setupLog.Info("starting manager", sdklog.Operation("start"))
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+		setupLog.Error(err, "problem running manager", sdklog.ErrorCode("MANAGER_RUN_ERROR"))
 		os.Exit(1)
 	}
 }
