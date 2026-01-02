@@ -1,6 +1,19 @@
 #!/bin/bash
 # zen-lead Functional Test Script
 # Tests failover behavior in a real Kubernetes cluster
+#
+# Usage:
+#   ./test/cluster-functional-test.sh <kubectl-context>
+#
+# Environment variables:
+#   VERSION          - Version tag (default: 0.1.0-alpha)
+#   IMAGE_TAG        - Image tag (default: VERSION)
+#   NUM_FAILOVERS    - Number of failovers to test (default: 50)
+#   TEST_NAMESPACE   - Namespace for testing (default: zen-lead-test)
+#
+# Example:
+#   ./test/cluster-functional-test.sh my-cluster-context
+#   VERSION=0.2.0 NUM_FAILOVERS=100 ./test/cluster-functional-test.sh my-cluster-context
 
 set -euo pipefail
 
