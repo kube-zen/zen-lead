@@ -345,6 +345,16 @@ if errors.Is(cacheCtx.Err(), context.DeadlineExceeded) && r.Metrics != nil {
 - **Change**: Added defensive check after sorting to ensure slice is not empty
 - **Location**: `pkg/director/service_director.go:562-565`
 
+### Fixed Bug #8: Cache Miss Race Condition
+- **Status**: ✅ FIXED
+- **Change**: Implemented double-checked locking pattern to eliminate race condition
+  - Upgrade to write lock when cache miss detected
+  - Double-check cache after acquiring write lock (another goroutine might have updated it)
+  - Created `updateOptedInServicesCacheLocked` helper that assumes lock is already held
+  - Update cache with lock held to prevent race condition window between unlock and re-lock
+  - Eliminates potential race condition where another goroutine could modify cache between unlock and re-lock
+- **Location**: `pkg/director/service_director.go:1292-1318, 1389-1456`
+
 ### Fixed Bug #9: Enhanced Error Handling in `resolveNamedPort`
 - **Status**: ✅ FIXED
 - **Change**: Added validation for nil pod, empty containers, and invalid port numbers
@@ -352,7 +362,8 @@ if errors.Is(cacheCtx.Err(), context.DeadlineExceeded) && r.Metrics != nil {
 
 ---
 
-**Remaining Issues**: 
-- Bug #8: Cache miss race condition - This is acceptable behavior (documented as expected)
-- All other bugs have been fixed!
+**All Bugs Fixed!** ✅
+- All 10 bugs have been identified and fixed
+- Code is now more robust with proper locking, error handling, and defensive programming
+- Thread safety improved with double-checked locking pattern
 
