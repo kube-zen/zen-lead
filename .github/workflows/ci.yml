@@ -146,7 +146,7 @@ jobs:
           cache-dependency-path: go.sum
       
       - name: Install kind
-        uses: container-tools/kind-action@v1
+        uses: container-tools/kind-action@v2
         with:
           version: "v0.20.0"
       
