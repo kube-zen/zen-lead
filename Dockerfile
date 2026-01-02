@@ -27,9 +27,9 @@ RUN go mod edit -replace github.com/kube-zen/zen-sdk=./zen-sdk
 RUN go mod download
 
 # Copy source code
-    COPY cmd/ cmd/
-    COPY pkg/ pkg/
-    COPY Makefile Makefile
+    COPY zen-lead/cmd/ cmd/
+    COPY zen-lead/pkg/ pkg/
+    COPY zen-lead/Makefile Makefile
 
 # Build
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
