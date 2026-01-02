@@ -559,6 +559,11 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 		return readyPods[i].Name < readyPods[j].Name
 	})
 
+	// Defensive check: ensure we have at least one pod (should never happen due to earlier check)
+	if len(readyPods) == 0 {
+		return nil
+	}
+
 	// Return oldest Ready pod
 	leaderPod := &readyPods[0]
 	logger.Info("Selected new leader pod", sdklog.Operation("select_leader"), sdklog.String("pod", leaderPod.Name))
@@ -817,10 +822,19 @@ func (r *ServiceDirectorReconciler) resolveServicePorts(svc *corev1.Service, lea
 
 // resolveNamedPort resolves a named port against a pod's container ports
 func (r *ServiceDirectorReconciler) resolveNamedPort(pod *corev1.Pod, portName string) (int32, error) {
+	if pod == nil {
+		return 0, fmt.Errorf("cannot resolve named port %s: pod is nil", portName)
+	}
+	if len(pod.Spec.Containers) == 0 {
+		return 0, fmt.Errorf("named port %s not found in pod %s: pod has no containers", portName, pod.Name)
+	}
 	for i := range pod.Spec.Containers { //nolint:gocritic // rangeValCopy: using index to avoid copy
 		container := &pod.Spec.Containers[i]
 		for _, containerPort := range container.Ports {
 			if containerPort.Name == portName {
+				if containerPort.ContainerPort <= 0 {
+					return 0, fmt.Errorf("named port %s in pod %s has invalid port number: %d", portName, pod.Name, containerPort.ContainerPort)
+				}
 				return containerPort.ContainerPort, nil
 			}
 		}
@@ -848,6 +862,9 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 
 	// Convert ServicePorts to EndpointPorts (using resolved targetPort)
 	// Note: resolveServicePorts already resolved named ports, so TargetPort should be int here
+	if len(servicePorts) == 0 {
+		return fmt.Errorf("service %s/%s has no ports configured", svc.Namespace, svc.Name)
+	}
 	endpointPorts := make([]discoveryv1.EndpointPort, len(servicePorts))
 	for i, port := range servicePorts {
 		var portNum *int32
@@ -1287,8 +1304,19 @@ func (r *ServiceDirectorReconciler) mapPodToService(ctx context.Context, obj cli
 		r.cacheMu.RLock()
 		cachedServices = r.optedInServicesCache[pod.Namespace]
 		r.cacheMu.RUnlock()
-	} else if r.Metrics != nil {
-		r.Metrics.RecordCacheHit(pod.Namespace)
+	} else {
+		// Cache hit - update access time for LRU (upgrade to write lock)
+		now := time.Now()
+		r.cacheMu.Lock()
+		// Re-read cache in case it was updated between RUnlock and Lock
+		cachedServices = r.optedInServicesCache[pod.Namespace]
+		for _, cachedSvc := range cachedServices {
+			cachedSvc.lastAccess = now
+		}
+		r.cacheMu.Unlock()
+		if r.Metrics != nil {
+			r.Metrics.RecordCacheHit(pod.Namespace)
+		}
 	}
 
 	// Use pooled slice to reduce allocations
@@ -1385,20 +1413,23 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 			continue
 		}
 		selector := labels.SelectorFromSet(svc.Spec.Selector)
+		now := time.Now()
 		cached = append(cached, &cachedService{
-			name:     svc.Name,
-			selector: selector,
+			name:       svc.Name,
+			selector:   selector,
+			lastAccess: now, // Initialize access time
 		})
 	}
 	
-	// Apply cache size limit (LRU eviction: keep oldest services)
+	// Apply cache size limit (LRU eviction: keep most recently accessed)
 	if r.maxCacheSizePerNamespace > 0 && len(cached) > r.maxCacheSizePerNamespace {
-		// Sort by service name (deterministic) and keep first N
+		// Sort by last access time (most recent first), then keep first N
 		sort.Slice(cached, func(i, j int) bool {
-			return cached[i].name < cached[j].name
+			// Most recently accessed first (descending order)
+			return cached[i].lastAccess.After(cached[j].lastAccess)
 		})
 		cached = cached[:r.maxCacheSizePerNamespace]
-		logger.Debug("Cache size limit applied",
+		logger.Debug("Cache size limit applied (LRU eviction)",
 			sdklog.String("namespace", namespace),
 			sdklog.Int("limit", r.maxCacheSizePerNamespace),
 			sdklog.Int("cached", len(cached)))
@@ -1466,17 +1497,20 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCacheForService(svc *co
 
 	// Add or update in cache
 	selector := labels.SelectorFromSet(svc.Spec.Selector)
+	now := time.Now()
 	cached := r.optedInServicesCache[svc.Namespace]
 	for i, cachedSvc := range cached {
 		if cachedSvc.name == svc.Name {
-			// Update existing
+			// Update existing (update access time for LRU)
 			cached[i].selector = selector
+			cached[i].lastAccess = now
 			return
 		}
 	}
 	// Add new
 	r.optedInServicesCache[svc.Namespace] = append(cached, &cachedService{
-		name:     svc.Name,
-		selector: selector,
+		name:       svc.Name,
+		selector:   selector,
+		lastAccess: now,
 	})
 }
