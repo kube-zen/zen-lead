@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All metrics now use controller-runtime metrics registry instead of prometheus default registry
 - Maintains backward compatibility: all existing zen-lead-specific metrics remain unchanged
 
+**Lifecycle Migration:**
+- Migrated to `zen-sdk/pkg/lifecycle` for graceful shutdown
+- Replaced `ctrl.SetupSignalHandler()` with `lifecycle.ShutdownContext()` for consistent signal handling across Zen components
+
 **Configuration:**
 - `--max-cache-size-per-namespace` flag to configure in-memory cache size limit per namespace (default: 1000)
 - `--max-concurrent-reconciles` flag to configure maximum concurrent reconciliations (default: 10)

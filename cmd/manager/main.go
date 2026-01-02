@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/kube-zen/zen-lead/pkg/controller"
 	"github.com/kube-zen/zen-lead/pkg/director"
 	"github.com/kube-zen/zen-sdk/pkg/leader"
+	"github.com/kube-zen/zen-sdk/pkg/lifecycle"
 	sdklog "github.com/kube-zen/zen-sdk/pkg/logging"
 	"github.com/kube-zen/zen-sdk/pkg/observability"
 )
@@ -91,8 +93,11 @@ func main() {
 	logger = sdklog.NewLogger("zen-lead")
 	setupLog = logger.WithComponent("setup")
 
+	// Create shutdown context using zen-sdk lifecycle (replaces ctrl.SetupSignalHandler)
+	ctx, cancel := lifecycle.ShutdownContext(context.Background(), "zen-lead")
+	defer cancel()
+
 	// Initialize OpenTelemetry tracing (optional, uses environment variables)
-	ctx := ctrl.SetupSignalHandler()
 	shutdownTracing, err := observability.InitWithDefaults(ctx, "zen-lead")
 	if err != nil {
 		setupLog.Warn("Failed to initialize OpenTelemetry tracing", sdklog.ErrorCode("TRACING_INIT_ERROR"), sdklog.String("error", err.Error()))
@@ -189,7 +194,7 @@ func main() {
 	}
 
 	setupLog.Info("starting manager", sdklog.Operation("start"))
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager", sdklog.ErrorCode("MANAGER_RUN_ERROR"))
 		os.Exit(1)
 	}
