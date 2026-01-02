@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Go 1.25 Upgrade**: Upgraded to Go 1.25.0 for improved performance and new features
+  - Automatic container-aware GOMAXPROCS optimization
+  - DWARF5 debug information for smaller binaries and faster linking
+  - Performance improvements in map and slice operations
+  - Dependency updates to latest compatible versions
 - **Failover Performance Optimizations**: Implemented three major optimizations to reduce failover time:
   - **Fast Retry Config**: Configurable retry settings for failover-critical operations (Get EndpointSlice, Get Pod, Patch EndpointSlice) with defaults: 20ms initial delay (vs 100ms), 500ms max delay (vs 5s), 2 attempts (vs 3). Configurable via `--fast-retry-initial-delay-ms`, `--fast-retry-max-delay-ms`, `--fast-retry-max-attempts` flags and Helm chart values.
   - **Leader Pod Cache**: Caches current leader pod per service to avoid redundant API calls during reconciliation. Configurable via `--enable-leader-pod-cache` (default: true) and `--leader-pod-cache-ttl-seconds` (default: 30s) flags and Helm chart values. Automatically invalidated on leader changes and pod deletions.
