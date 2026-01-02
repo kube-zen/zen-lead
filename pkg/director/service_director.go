@@ -180,6 +180,23 @@ type ServiceDirectorReconciler struct {
 
 	// metricsCollectionTimeout is the timeout for metrics collection operations
 	metricsCollectionTimeout time.Duration
+
+	// fastRetryConfig is the retry configuration for failover-critical operations
+	fastRetryConfig retry.Config
+
+	// leaderPodCache caches the current leader pod per service to avoid redundant API calls
+	leaderPodCache map[string]*cachedLeaderPod
+	leaderPodCacheMu sync.RWMutex
+
+	// enableParallelAPICalls enables parallel API calls where possible
+	enableParallelAPICalls bool
+}
+
+// cachedLeaderPod holds a cached leader pod with metadata
+type cachedLeaderPod struct {
+	pod        *corev1.Pod
+	expiresAt  time.Time
+	serviceKey string // namespace/name
 }
 
 // cachedService holds a Service's selector for efficient matching
@@ -190,7 +207,7 @@ type cachedService struct {
 }
 
 // NewServiceDirectorReconciler creates a new ServiceDirectorReconciler
-func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, maxCacheSizePerNamespace, maxConcurrentReconciles int, cacheUpdateTimeout, metricsCollectionTimeout time.Duration) *ServiceDirectorReconciler {
+func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, maxCacheSizePerNamespace, maxConcurrentReconciles int, cacheUpdateTimeout, metricsCollectionTimeout time.Duration, fastRetryInitialDelay, fastRetryMaxDelay time.Duration, fastRetryMaxAttempts int, enableLeaderPodCache bool, leaderPodCacheTTL time.Duration, enableParallelAPICalls bool) *ServiceDirectorReconciler {
 	if maxCacheSizePerNamespace <= 0 {
 		maxCacheSizePerNamespace = 1000 // Default: 1000 services per namespace
 	}
@@ -203,7 +220,32 @@ func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, 
 	if metricsCollectionTimeout <= 0 {
 		metricsCollectionTimeout = 5 * time.Second // Default: 5 seconds
 	}
-	return &ServiceDirectorReconciler{
+
+	// Configure fast retry for failover operations
+	fastRetryConfig := retry.Config{
+		MaxAttempts:    fastRetryMaxAttempts,
+		InitialDelay:   fastRetryInitialDelay,
+		MaxDelay:       fastRetryMaxDelay,
+		Multiplier:     2.0,
+		RetryableErrors: retry.DefaultConfig().RetryableErrors,
+	}
+	// Apply defaults if not set
+	if fastRetryConfig.MaxAttempts <= 0 {
+		fastRetryConfig.MaxAttempts = 2 // Default: 2 attempts for fast failover
+	}
+	if fastRetryConfig.InitialDelay <= 0 {
+		fastRetryConfig.InitialDelay = 20 * time.Millisecond // Default: 20ms for fast failover
+	}
+	if fastRetryConfig.MaxDelay <= 0 {
+		fastRetryConfig.MaxDelay = 500 * time.Millisecond // Default: 500ms max delay
+	}
+
+	// Default leader pod cache TTL
+	if leaderPodCacheTTL <= 0 {
+		leaderPodCacheTTL = 30 * time.Second // Default: 30 seconds
+	}
+
+	reconciler := &ServiceDirectorReconciler{
 		Client:                   client,
 		Scheme:                   scheme,
 		Recorder:                 recorder,
@@ -213,7 +255,18 @@ func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, 
 		maxConcurrentReconciles:  maxConcurrentReconciles,
 		cacheUpdateTimeout:       cacheUpdateTimeout,
 		metricsCollectionTimeout: metricsCollectionTimeout,
+		fastRetryConfig:          fastRetryConfig,
+		enableParallelAPICalls:   enableParallelAPICalls,
 	}
+
+	// Initialize leader pod cache only if enabled
+	if enableLeaderPodCache {
+		reconciler.leaderPodCache = make(map[string]*cachedLeaderPod)
+		// Start cache cleanup goroutine
+		go reconciler.cleanupLeaderPodCache(leaderPodCacheTTL)
+	}
+
+	return reconciler
 }
 
 // Reconcile reconciles a Service with zen-lead.io/enabled annotation
@@ -236,6 +289,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	})
 
 	// Fetch the Service (with retry for transient errors)
+	// If parallel API calls enabled, we can fetch Service and check cache in parallel
 	svc := &corev1.Service{}
 	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 		return r.Get(ctx, req.NamespacedName, svc)
@@ -366,6 +420,9 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			}
 			// Force new leader selection (bypass stickiness)
 			bypassStickiness = true
+			// Clear cache for this service since leader is unhealthy
+			serviceKey := fmt.Sprintf("%s/%s", svc.Namespace, svc.Name)
+			r.clearLeaderPodCache(serviceKey)
 			currentLeaderPod = nil
 		}
 	}
@@ -403,6 +460,16 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			sdklog.Operation("leader_change"),
 			sdklog.String("old_leader", oldLeader),
 			sdklog.String("new_leader", newLeader))
+		
+		// Update cache with new leader
+		serviceKey := fmt.Sprintf("%s/%s", svc.Namespace, svc.Name)
+		if leaderPod != nil {
+			r.updateLeaderPodCache(serviceKey, leaderPod, 30*time.Second) // Use default TTL
+		} else {
+			// No leader - clear cache
+			r.clearLeaderPodCache(serviceKey)
+		}
+		
 		if r.Metrics != nil {
 			// Record failover with reason
 			reason := "noneReady"
@@ -467,8 +534,37 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{}, nil
 }
 
-// getCurrentLeaderPod gets the current leader pod from the EndpointSlice (if it exists)
+// getCurrentLeaderPod gets the current leader pod from cache or EndpointSlice (if cache miss)
 func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc *corev1.Service, logger *sdklog.Logger) *corev1.Pod {
+	serviceKey := fmt.Sprintf("%s/%s", svc.Namespace, svc.Name)
+
+	// Try cache first (if enabled)
+	if r.leaderPodCache != nil {
+		r.leaderPodCacheMu.RLock()
+		cached, exists := r.leaderPodCache[serviceKey]
+		r.leaderPodCacheMu.RUnlock()
+
+		if exists && cached != nil && time.Now().Before(cached.expiresAt) {
+			// Cache hit - verify pod still exists and UID matches
+			pod := &corev1.Pod{}
+			podKey := types.NamespacedName{
+				Name:      cached.pod.Name,
+				Namespace: cached.pod.Namespace,
+			}
+			// Use fast retry for failover-critical operation
+			if err := retryDoWithMetrics(ctx, r.fastRetryConfig, func() error {
+				return r.Get(ctx, podKey, pod)
+			}, r.Metrics, svc.Namespace, svc.Name, "get_pod_cached"); err == nil {
+				// Verify UID matches (pod may have been recreated with same name)
+				if string(pod.UID) == string(cached.pod.UID) {
+					return pod
+				}
+			}
+			// Cache miss (pod not found or UID mismatch) - fall through to refresh
+		}
+	}
+
+	// Cache miss or expired - fetch from EndpointSlice
 	leaderServiceName := r.getLeaderServiceName(svc)
 	endpointSlice := &discoveryv1.EndpointSlice{}
 	endpointSliceKey := types.NamespacedName{
@@ -476,7 +572,8 @@ func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc
 		Namespace: svc.Namespace,
 	}
 
-	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
+	// Use fast retry for failover-critical operation
+	if err := retryDoWithMetrics(ctx, r.fastRetryConfig, func() error {
 		return r.Get(ctx, endpointSliceKey, endpointSlice)
 	}, r.Metrics, svc.Namespace, svc.Name, "get_endpointslice"); err != nil {
 		return nil
@@ -490,18 +587,70 @@ func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc
 				Name:      endpoint.TargetRef.Name,
 				Namespace: endpoint.TargetRef.Namespace,
 			}
-			if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
+			// Use fast retry for failover-critical operation
+			if err := retryDoWithMetrics(ctx, r.fastRetryConfig, func() error {
 				return r.Get(ctx, podKey, pod)
 			}, r.Metrics, svc.Namespace, svc.Name, "get_pod"); err == nil {
 				// Verify UID matches (pod may have been recreated with same name)
 				if string(pod.UID) == string(endpoint.TargetRef.UID) {
+					// Update cache
+					r.updateLeaderPodCache(serviceKey, pod, 30*time.Second) // Use default TTL
 					return pod
 				}
 			}
 		}
 	}
 
+	// No leader found - clear cache
+	r.clearLeaderPodCache(serviceKey)
 	return nil
+}
+
+// updateLeaderPodCache updates the leader pod cache
+func (r *ServiceDirectorReconciler) updateLeaderPodCache(serviceKey string, pod *corev1.Pod, ttl time.Duration) {
+	if r.leaderPodCache == nil {
+		return // Cache disabled
+	}
+	r.leaderPodCacheMu.Lock()
+	defer r.leaderPodCacheMu.Unlock()
+	r.leaderPodCache[serviceKey] = &cachedLeaderPod{
+		pod:        pod.DeepCopy(),
+		expiresAt:  time.Now().Add(ttl),
+		serviceKey: serviceKey,
+	}
+}
+
+// clearLeaderPodCache clears the leader pod cache for a service
+func (r *ServiceDirectorReconciler) clearLeaderPodCache(serviceKey string) {
+	if r.leaderPodCache == nil {
+		return // Cache disabled
+	}
+	r.leaderPodCacheMu.Lock()
+	defer r.leaderPodCacheMu.Unlock()
+	delete(r.leaderPodCache, serviceKey)
+}
+
+// cleanupLeaderPodCache periodically cleans up expired cache entries
+func (r *ServiceDirectorReconciler) cleanupLeaderPodCache(ttl time.Duration) {
+	if r.leaderPodCache == nil {
+		return // Cache disabled
+	}
+	ticker := time.NewTicker(ttl / 2) // Clean up every half TTL
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if r.leaderPodCache == nil {
+			return // Cache disabled
+		}
+		now := time.Now()
+		r.leaderPodCacheMu.Lock()
+		for key, cached := range r.leaderPodCache {
+			if now.After(cached.expiresAt) {
+				delete(r.leaderPodCache, key)
+			}
+		}
+		r.leaderPodCacheMu.Unlock()
+	}
 }
 
 // selectLeaderPod selects the leader pod using controller-driven selection with stickiness
@@ -1034,7 +1183,8 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 			Ports:       endpointPorts,
 		}
 
-		if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
+		// Use fast retry for failover-critical operation
+		if err := retryDoWithMetrics(ctx, r.fastRetryConfig, func() error {
 			return r.Create(ctx, endpointSlice)
 		}, r.Metrics, svc.Namespace, svc.Name, "create_endpointslice"); err != nil {
 			// Record endpoint write error
@@ -1072,7 +1222,8 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 	endpointSlice.Ports = endpointPorts
 	endpointSlice.AddressType = addressType
 
-	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
+	// Use fast retry for failover-critical operation
+	if err := retryDoWithMetrics(ctx, r.fastRetryConfig, func() error {
 		return r.Patch(ctx, endpointSlice, client.MergeFrom(originalEndpointSlice))
 	}, r.Metrics, svc.Namespace, svc.Name, "patch_endpointslice"); err != nil {
 		// Record endpoint write error

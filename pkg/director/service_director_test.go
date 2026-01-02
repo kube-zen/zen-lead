@@ -1180,7 +1180,7 @@ func TestNewServiceDirectorReconciler(t *testing.T) {
 		Build()
 	eventRecorder := record.NewFakeRecorder(10)
 
-	r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+	r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true)
 
 	if r == nil {
 		t.Fatal("NewServiceDirectorReconciler() returned nil")
@@ -2277,7 +2277,7 @@ func TestServiceDirectorReconciler_ResolveNamedPort(t *testing.T) {
 			corev1.AddToScheme(scheme)
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 			eventRecorder := record.NewFakeRecorder(10)
-			r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+			r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true)
 
 			result, err := r.resolveNamedPort(tt.pod, tt.portName)
 			if tt.expectError {
@@ -2359,7 +2359,7 @@ func TestServiceDirectorReconciler_SelectLeaderPod_StickyAndMinReadyDuration(t *
 			Build()
 
 		eventRecorder := record.NewFakeRecorder(10)
-		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true)
 
 		logger := packageLogger.WithContext(context.Background())
 		selected := r.selectLeaderPod(context.Background(), service, []corev1.Pod{*leaderPod}, false, logger)
@@ -2435,7 +2435,7 @@ func TestServiceDirectorReconciler_SelectLeaderPod_StickyAndMinReadyDuration(t *
 			Build()
 
 		eventRecorder := record.NewFakeRecorder(10)
-		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true)
 
 		logger := packageLogger.WithContext(context.Background())
 		selected := r.selectLeaderPod(context.Background(), service, []corev1.Pod{*recentPod, *stablePod}, true, logger)
@@ -2485,7 +2485,7 @@ func TestServiceDirectorReconciler_SelectLeaderPod_StickyAndMinReadyDuration(t *
 			Build()
 
 		eventRecorder := record.NewFakeRecorder(10)
-		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true)
 
 		logger := packageLogger.WithContext(context.Background())
 		selected := r.selectLeaderPod(context.Background(), service, []corev1.Pod{*pod1}, false, logger)
@@ -2505,7 +2505,7 @@ func TestServiceDirectorReconciler_UpdateResourceTotals_ErrorPaths(t *testing.T)
 	t.Run("nil metrics", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 		eventRecorder := record.NewFakeRecorder(10)
-		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true)
 		r.Metrics = nil
 
 		logger := packageLogger.WithContext(context.Background())
@@ -2517,7 +2517,7 @@ func TestServiceDirectorReconciler_UpdateResourceTotals_ErrorPaths(t *testing.T)
 	t.Run("timeout scenario", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 		eventRecorder := record.NewFakeRecorder(10)
-		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 1*time.Nanosecond) // Very short timeout
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 1*time.Nanosecond, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true) // Very short timeout
 
 		logger := packageLogger.WithContext(context.Background())
 		// Should handle timeout gracefully
@@ -2549,7 +2549,7 @@ func TestServiceDirectorReconciler_CleanupLeaderResources_ErrorPaths(t *testing.
 			Build()
 
 		eventRecorder := record.NewFakeRecorder(10)
-		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true)
 
 		logger := packageLogger.WithContext(context.Background())
 		svcName := types.NamespacedName{Name: "my-service", Namespace: "default"}
@@ -2590,7 +2590,7 @@ func TestServiceDirectorReconciler_Reconcile_ErrorPaths(t *testing.T) {
 			Build()
 
 		eventRecorder := record.NewFakeRecorder(10)
-		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true)
 
 		req := types.NamespacedName{Name: service.Name, Namespace: service.Namespace}
 		result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: req})
@@ -2607,7 +2607,7 @@ func TestServiceDirectorReconciler_Reconcile_ErrorPaths(t *testing.T) {
 	t.Run("service not found", func(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 		eventRecorder := record.NewFakeRecorder(10)
-		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second, 20*time.Millisecond, 500*time.Millisecond, 2, true, 30*time.Second, true)
 
 		req := types.NamespacedName{Name: "non-existent", Namespace: "default"}
 		result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: req})

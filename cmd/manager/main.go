@@ -87,6 +87,30 @@ func main() {
 	flag.IntVar(&burst, "burst", 100,
 		"Burst limit for Kubernetes API client. Default: 100.")
 
+	var fastRetryInitialDelayMs int
+	flag.IntVar(&fastRetryInitialDelayMs, "fast-retry-initial-delay-ms", 20,
+		"Initial delay in milliseconds for fast retry config (failover operations). Default: 20ms.")
+
+	var fastRetryMaxDelayMs int
+	flag.IntVar(&fastRetryMaxDelayMs, "fast-retry-max-delay-ms", 500,
+		"Maximum delay in milliseconds for fast retry config (failover operations). Default: 500ms.")
+
+	var fastRetryMaxAttempts int
+	flag.IntVar(&fastRetryMaxAttempts, "fast-retry-max-attempts", 2,
+		"Maximum retry attempts for fast retry config (failover operations). Default: 2.")
+
+	var enableLeaderPodCache bool
+	flag.BoolVar(&enableLeaderPodCache, "enable-leader-pod-cache", true,
+		"Enable caching of current leader pod to reduce API calls. Default: true.")
+
+	var leaderPodCacheTTLSeconds int
+	flag.IntVar(&leaderPodCacheTTLSeconds, "leader-pod-cache-ttl-seconds", 30,
+		"TTL in seconds for leader pod cache entries. Default: 30s.")
+
+	var enableParallelAPICalls bool
+	flag.BoolVar(&enableParallelAPICalls, "enable-parallel-api-calls", true,
+		"Enable parallel API calls where possible to reduce failover time. Default: true.")
+
 	flag.Parse()
 
 	// Initialize zen-sdk logger (configures controller-runtime logger automatically)
@@ -157,7 +181,21 @@ func main() {
 	// Non-invasive Service-based approach: watches Services with zen-lead.io/enabled annotation
 	// This is Profile A (network-only, CRD-free) - always enabled
 	eventRecorder := mgr.GetEventRecorderFor("zen-lead-controller")
-	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder, maxCacheSizePerNamespace, maxConcurrentReconciles, time.Duration(cacheUpdateTimeoutSeconds)*time.Second, time.Duration(metricsCollectionTimeoutSeconds)*time.Second)
+	reconciler := director.NewServiceDirectorReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		eventRecorder,
+		maxCacheSizePerNamespace,
+		maxConcurrentReconciles,
+		time.Duration(cacheUpdateTimeoutSeconds)*time.Second,
+		time.Duration(metricsCollectionTimeoutSeconds)*time.Second,
+		time.Duration(fastRetryInitialDelayMs)*time.Millisecond,
+		time.Duration(fastRetryMaxDelayMs)*time.Millisecond,
+		fastRetryMaxAttempts,
+		enableLeaderPodCache,
+		time.Duration(leaderPodCacheTTLSeconds)*time.Second,
+		enableParallelAPICalls,
+	)
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", sdklog.Component("ServiceDirector"), sdklog.ErrorCode("CONTROLLER_SETUP_ERROR"))
 		os.Exit(1)
