@@ -360,6 +360,58 @@ Failover is bounded by:
 
 **Known limitation:** If you rely on NetworkPolicy rules that are keyed to Service selectors (non-standard pattern), you may need to adapt your policies. Standard pod-label-based NetworkPolicy works without changes.
 
+## ❓ Frequently Asked Questions (FAQ)
+
+### Q: How does zen-lead differ from client-go leader election?
+
+**A:** zen-lead provides **network-level routing** (works for any client, any language) while client-go requires **code changes** (Go library import). zen-lead is for **workload leader routing** (which pod receives traffic), while client-go is for **controller HA** (which controller replica runs reconcilers).
+
+### Q: Can I use zen-lead for controller HA?
+
+**A:** For controller HA, use `zen-sdk/pkg/leader` which provides a simpler interface than client-go. zen-lead is specifically for workload leader routing (selecting which pod receives traffic).
+
+### Q: What happens if all pods become NotReady?
+
+**A:** The leader Service will have no endpoints (empty EndpointSlice). This is a clean failure mode - traffic won't route anywhere until at least one pod becomes Ready again.
+
+### Q: How fast is failover?
+
+**A:** Typically 2-5 seconds total:
+- Pod readiness transition: ~1 second
+- Controller reconciliation: ~1-2 seconds
+- kube-proxy EndpointSlice update: ~1-2 seconds
+
+### Q: Can I customize leader selection strategy?
+
+**A:** Currently, zen-lead uses sticky + oldest Ready pod strategy. Future versions may support configurable strategies (newest, random, node-aware) via Service annotations.
+
+### Q: Does zen-lead work with headless Services?
+
+**A:** Yes, zen-lead works with any Service that has a selector. The leader Service is always selector-less regardless of the source Service type.
+
+### Q: What if I have 1000+ Services per namespace?
+
+**A:** Increase `controller.maxCacheSizePerNamespace` in the Helm chart (default: 1000). Monitor `zen_lead_cache_size` and `zen_lead_cache_hits_total` metrics to tune.
+
+### Q: Can I disable zen-lead for a Service?
+
+**A:** Yes, remove the `zen-lead.io/enabled: "true"` annotation. zen-lead will automatically clean up the leader Service and EndpointSlice.
+
+### Q: Does zen-lead work with StatefulSets?
+
+**A:** Yes, zen-lead works with any workload type (Deployment, StatefulSet, DaemonSet, etc.) as long as the Service has a selector.
+
+### Q: What metrics should I monitor?
+
+**A:** Key metrics:
+- `zen_lead_leader_service_without_endpoints` - Should be 0 (indicates no leader)
+- `zen_lead_failover_count_total` - Track failover frequency
+- `zen_lead_reconciliation_errors_total` - Should be low
+- `zen_lead_api_call_duration_seconds` - P95 should be < 1s
+- `zen_lead_cache_size` - Monitor cache growth
+
+See `deploy/prometheus/prometheus-rules.yaml` for recommended alerts.
+
 ### Headless Services
 
 If the source Service is headless (`spec.clusterIP: None`), zen-lead still allows opt-in. The leader Service defaults to `ClusterIP` (normal) unless explicitly overridden. This ensures the leader Service is routable even when the source Service is headless.
