@@ -185,7 +185,7 @@ type ServiceDirectorReconciler struct {
 	fastRetryConfig retry.Config
 
 	// leaderPodCache caches the current leader pod per service to avoid redundant API calls
-	leaderPodCache map[string]*cachedLeaderPod
+	leaderPodCache   map[string]*cachedLeaderPod
 	leaderPodCacheMu sync.RWMutex
 
 	// enableParallelAPICalls enables parallel API calls where possible
@@ -223,10 +223,10 @@ func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, 
 
 	// Configure fast retry for failover operations
 	fastRetryConfig := retry.Config{
-		MaxAttempts:    fastRetryMaxAttempts,
-		InitialDelay:   fastRetryInitialDelay,
-		MaxDelay:       fastRetryMaxDelay,
-		Multiplier:     2.0,
+		MaxAttempts:     fastRetryMaxAttempts,
+		InitialDelay:    fastRetryInitialDelay,
+		MaxDelay:        fastRetryMaxDelay,
+		Multiplier:      2.0,
 		RetryableErrors: retry.DefaultConfig().RetryableErrors,
 	}
 	// Apply defaults if not set
@@ -460,7 +460,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			sdklog.Operation("leader_change"),
 			sdklog.String("old_leader", oldLeader),
 			sdklog.String("new_leader", newLeader))
-		
+
 		// Update cache with new leader
 		serviceKey := fmt.Sprintf("%s/%s", svc.Namespace, svc.Name)
 		if leaderPod != nil {
@@ -469,7 +469,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// No leader - clear cache
 			r.clearLeaderPodCache(serviceKey)
 		}
-		
+
 		if r.Metrics != nil {
 			// Record failover with reason
 			reason := "noneReady"
