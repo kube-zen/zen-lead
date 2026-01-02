@@ -18,11 +18,17 @@ package metrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
+	sdkmetrics "github.com/kube-zen/zen-sdk/pkg/metrics"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 // Recorder provides zen-lead-specific Prometheus metrics
+// It embeds zen-sdk/pkg/metrics.Recorder for standardized reconciliation metrics
+// and adds zen-lead domain-specific metrics
 type Recorder struct {
+	// Embedded zen-sdk recorder for base reconciliation metrics
+	*sdkmetrics.Recorder
+
 	// Zen-lead specific metrics
 	leaderDurationSeconds         *prometheus.GaugeVec
 	failoverCountTotal            *prometheus.CounterVec
@@ -67,11 +73,15 @@ func NewRecorder() *Recorder {
 		return globalRecorder
 	}
 
+	// Create zen-sdk base recorder for standardized reconciliation metrics
+	sdkRecorder := sdkmetrics.NewRecorder("zen-lead")
+
 	// Create zen-lead-specific metrics
 	recorder := &Recorder{
+		Recorder: sdkRecorder,
 
 		// Leader duration: how long a pod has been the leader (no pod label for cardinality)
-		leaderDurationSeconds: promauto.NewGaugeVec(
+		leaderDurationSeconds: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_leader_duration_seconds",
 				Help: "Duration in seconds that the current leader pod has been the leader",
@@ -80,7 +90,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Failover count: total number of leader changes (with reason label)
-		failoverCountTotal: promauto.NewCounterVec(
+		failoverCountTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_failover_count_total",
 				Help: "Total number of leader failovers (leader changes)",
@@ -88,8 +98,8 @@ func NewRecorder() *Recorder {
 			[]string{"namespace", "service", "reason"}, // reason: notReady, terminating, noIP, noneReady
 		),
 
-		// Reconciliation duration: duration of reconciliation loops
-		reconciliationDurationSeconds: promauto.NewHistogramVec(
+		// Reconciliation duration: duration of reconciliation loops (zen-lead specific with namespace/service labels)
+		reconciliationDurationSeconds: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "zen_lead_reconciliation_duration_seconds",
 				Help:    "Duration of reconciliation loops in seconds",
@@ -99,7 +109,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Pods available: number of Ready pods available for leader selection
-		podsAvailable: promauto.NewGaugeVec(
+		podsAvailable: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_pods_available",
 				Help: "Number of Ready pods available for leader selection",
@@ -108,7 +118,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Port resolution failures: failures in resolving named targetPorts
-		portResolutionFailuresTotal: promauto.NewCounterVec(
+		portResolutionFailuresTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_port_resolution_failures_total",
 				Help: "Total number of port resolution failures (named targetPort)",
@@ -117,7 +127,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Reconciliation errors: total number of reconciliation errors
-		reconciliationErrorsTotal: promauto.NewCounterVec(
+		reconciliationErrorsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_reconciliation_errors_total",
 				Help: "Total number of reconciliation errors",
@@ -126,7 +136,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Leader services: total number of leader Services managed
-		leaderServicesTotal: promauto.NewGaugeVec(
+		leaderServicesTotal: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_leader_services_total",
 				Help: "Total number of leader Services currently managed",
@@ -135,7 +145,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// EndpointSlices: total number of EndpointSlices managed
-		endpointSlicesTotal: promauto.NewGaugeVec(
+		endpointSlicesTotal: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_endpointslices_total",
 				Help: "Total number of EndpointSlices currently managed",
@@ -144,7 +154,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Sticky leader hits: when sticky leader was kept (no change)
-		stickyLeaderHitsTotal: promauto.NewCounterVec(
+		stickyLeaderHitsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_sticky_leader_hits_total",
 				Help: "Total number of times sticky leader was kept (no leader change)",
@@ -153,7 +163,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Sticky leader misses: when sticky leader was not available and new leader selected
-		stickyLeaderMissesTotal: promauto.NewCounterVec(
+		stickyLeaderMissesTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_sticky_leader_misses_total",
 				Help: "Total number of times sticky leader was not available (new leader selected)",
@@ -162,7 +172,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Leader selection attempts: total number of leader selection operations
-		leaderSelectionAttemptsTotal: promauto.NewCounterVec(
+		leaderSelectionAttemptsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_leader_selection_attempts_total",
 				Help: "Total number of leader selection attempts",
@@ -171,7 +181,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Leader pod age: age of the current leader pod in seconds (no pod label for cardinality)
-		leaderPodAgeSeconds: promauto.NewGaugeVec(
+		leaderPodAgeSeconds: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_leader_pod_age_seconds",
 				Help: "Age of the current leader pod in seconds (since pod creation)",
@@ -180,7 +190,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Leader service without endpoints: leader Services that have no endpoints
-		leaderServiceWithoutEndpoints: promauto.NewGaugeVec(
+		leaderServiceWithoutEndpoints: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_leader_service_without_endpoints",
 				Help: "Leader Services that have no endpoints (1 = no endpoints, 0 = has endpoints)",
@@ -189,7 +199,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Reconciliations total: total number of reconciliations
-		reconciliationsTotal: promauto.NewCounterVec(
+		reconciliationsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_reconciliations_total",
 				Help: "Total number of reconciliations",
@@ -198,7 +208,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Leader stable: gauge indicating if leader exists and is Ready
-		leaderStable: promauto.NewGaugeVec(
+		leaderStable: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_leader_stable",
 				Help: "Leader stability indicator (1 = leader exists and is Ready, 0 = no leader or not Ready)",
@@ -207,7 +217,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Endpoint write errors: errors writing EndpointSlice
-		endpointWriteErrorsTotal: promauto.NewCounterVec(
+		endpointWriteErrorsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_endpoint_write_errors_total",
 				Help: "Total number of errors writing EndpointSlice",
@@ -216,7 +226,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Retry attempts: total number of retry attempts for K8s API calls
-		retryAttemptsTotal: promauto.NewCounterVec(
+		retryAttemptsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_retry_attempts_total",
 				Help: "Total number of retry attempts for Kubernetes API operations",
@@ -225,7 +235,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Retry success after retry: operations that succeeded after retry
-		retrySuccessAfterRetryTotal: promauto.NewCounterVec(
+		retrySuccessAfterRetryTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_retry_success_after_retry_total",
 				Help: "Total number of operations that succeeded after retry",
@@ -234,7 +244,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Cache size: number of cached services per namespace
-		cacheSize: promauto.NewGaugeVec(
+		cacheSize: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "zen_lead_cache_size",
 				Help: "Number of cached opted-in services per namespace",
@@ -243,7 +253,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Cache update duration: time taken to update cache
-		cacheUpdateDurationSeconds: promauto.NewHistogramVec(
+		cacheUpdateDurationSeconds: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "zen_lead_cache_update_duration_seconds",
 				Help:    "Duration of cache update operations in seconds",
@@ -253,7 +263,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Cache hits: successful cache lookups
-		cacheHitsTotal: promauto.NewCounterVec(
+		cacheHitsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_cache_hits_total",
 				Help: "Total number of cache hits (namespace found in cache)",
@@ -262,7 +272,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Cache misses: cache lookups that required refresh
-		cacheMissesTotal: promauto.NewCounterVec(
+		cacheMissesTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_cache_misses_total",
 				Help: "Total number of cache misses (namespace not found, cache refreshed)",
@@ -271,7 +281,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Timeout occurrences: operations that timed out
-		timeoutOccurrencesTotal: promauto.NewCounterVec(
+		timeoutOccurrencesTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "zen_lead_timeout_occurrences_total",
 				Help: "Total number of operations that timed out",
@@ -280,7 +290,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// Failover latency: time from leader unhealthy detection to new leader selected
-		failoverLatencySeconds: promauto.NewHistogramVec(
+		failoverLatencySeconds: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "zen_lead_failover_latency_seconds",
 				Help:    "Time from leader unhealthy detection to new leader selected in seconds",
@@ -290,7 +300,7 @@ func NewRecorder() *Recorder {
 		),
 
 		// API call latency: duration of Kubernetes API operations
-		apiCallDurationSeconds: promauto.NewHistogramVec(
+		apiCallDurationSeconds: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "zen_lead_api_call_duration_seconds",
 				Help:    "Duration of Kubernetes API operations in seconds",
@@ -299,6 +309,36 @@ func NewRecorder() *Recorder {
 			[]string{"namespace", "service", "operation", "result"}, // operation: get, list, create, patch, delete, result: success, error
 		),
 	}
+
+	// Register all zen-lead-specific metrics with controller-runtime registry
+	// (zen-sdk metrics are already registered by sdkRecorder)
+	metrics.Registry.MustRegister(
+		recorder.leaderDurationSeconds,
+		recorder.failoverCountTotal,
+		recorder.reconciliationDurationSeconds,
+		recorder.podsAvailable,
+		recorder.portResolutionFailuresTotal,
+		recorder.reconciliationErrorsTotal,
+		recorder.leaderServicesTotal,
+		recorder.endpointSlicesTotal,
+		recorder.stickyLeaderHitsTotal,
+		recorder.stickyLeaderMissesTotal,
+		recorder.leaderSelectionAttemptsTotal,
+		recorder.leaderPodAgeSeconds,
+		recorder.leaderServiceWithoutEndpoints,
+		recorder.reconciliationsTotal,
+		recorder.leaderStable,
+		recorder.endpointWriteErrorsTotal,
+		recorder.retryAttemptsTotal,
+		recorder.retrySuccessAfterRetryTotal,
+		recorder.cacheSize,
+		recorder.cacheUpdateDurationSeconds,
+		recorder.cacheHitsTotal,
+		recorder.cacheMissesTotal,
+		recorder.timeoutOccurrencesTotal,
+		recorder.failoverLatencySeconds,
+		recorder.apiCallDurationSeconds,
+	)
 
 	globalRecorder = recorder
 	return recorder
@@ -317,7 +357,15 @@ func (r *Recorder) RecordFailover(namespace, service, reason string) {
 }
 
 // RecordReconciliationDuration records the duration of a reconciliation loop.
+// This records both zen-sdk standardized metrics and zen-lead-specific metrics with namespace/service labels.
 func (r *Recorder) RecordReconciliationDuration(namespace, service, result string, durationSeconds float64) {
+	// Record zen-sdk standardized metric (component-level)
+	if result == "success" {
+		r.Recorder.RecordReconciliationSuccess(durationSeconds)
+	} else {
+		r.Recorder.RecordReconciliationError(durationSeconds)
+	}
+	// Also record zen-lead-specific metric (namespace/service-level)
 	r.reconciliationDurationSeconds.WithLabelValues(namespace, service, result).Observe(durationSeconds)
 }
 
@@ -332,7 +380,11 @@ func (r *Recorder) RecordPortResolutionFailure(namespace, service, portName stri
 }
 
 // RecordReconciliationError increments the reconciliation error counter.
+// This records both zen-sdk standardized metrics and zen-lead-specific metrics with namespace/service labels.
 func (r *Recorder) RecordReconciliationError(namespace, service, errorType string) {
+	// Record zen-sdk standardized metric (component-level)
+	r.Recorder.RecordError("reconciliation")
+	// Also record zen-lead-specific metric (namespace/service-level)
 	r.reconciliationErrorsTotal.WithLabelValues(namespace, service, errorType).Inc()
 }
 

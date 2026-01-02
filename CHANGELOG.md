@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+**Metrics Migration:**
+- Migrated to `zen-sdk/pkg/metrics` for standardized reconciliation metrics
+- Now exposes both `zen_reconciliations_total` (component-level) and `zen_lead_reconciliations_total` (namespace/service-level)
+- All metrics now use controller-runtime metrics registry instead of prometheus default registry
+- Maintains backward compatibility: all existing zen-lead-specific metrics remain unchanged
+
 **Configuration:**
 - `--max-cache-size-per-namespace` flag to configure in-memory cache size limit per namespace (default: 1000)
 - `--max-concurrent-reconciles` flag to configure maximum concurrent reconciliations (default: 10)
