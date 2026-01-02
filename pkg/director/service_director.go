@@ -1251,7 +1251,11 @@ func (r *ServiceDirectorReconciler) mapPodToService(ctx context.Context, obj cli
 	}
 
 	// Use pooled slice to reduce allocations
-	requestsPtr := requestSlicePool.Get().(*[]reconcile.Request)
+	requestsPtr, ok := requestSlicePool.Get().(*[]reconcile.Request)
+	if !ok {
+		// This should never happen as we control the pool, but handle gracefully
+		requestsPtr = &[]reconcile.Request{}
+	}
 	requests := *requestsPtr
 	requests = requests[:0] // Reset length, keep capacity
 	defer requestSlicePool.Put(requestsPtr)
