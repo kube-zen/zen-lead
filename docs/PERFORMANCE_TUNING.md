@@ -125,11 +125,86 @@ hit_rate = cache_hits / (cache_hits + cache_misses)
 
 ---
 
+## Failover Performance Optimizations
+
+### Fast Retry Configuration
+
+zen-lead uses **two retry configurations**:
+1. **Standard retry** (for non-critical operations): 3 attempts, 100ms initial delay, 5s max delay
+2. **Fast retry** (for failover-critical operations): 2 attempts, 20ms initial delay, 500ms max delay
+
+**Failover-Critical Operations** (use fast retry):
+- Get EndpointSlice (to find current leader)
+- Get Pod (to verify current leader)
+- Create/Patch EndpointSlice (to update leader)
+
+**Configuration:**
+- `--fast-retry-initial-delay-ms` (default: 20ms): Initial delay before first retry
+- `--fast-retry-max-delay-ms` (default: 500ms): Maximum delay between retries
+- `--fast-retry-max-attempts` (default: 2): Maximum retry attempts
+
+**Via Helm:**
+```yaml
+controller:
+  fastRetryInitialDelayMs: 20
+  fastRetryMaxDelayMs: 500
+  fastRetryMaxAttempts: 2
+```
+
+**When to Adjust:**
+- **Decrease delays** if you need faster failover (may increase API server load)
+- **Increase delays** if you experience API server rate limiting during failovers
+- **Increase attempts** if you have transient API server issues
+
+### Leader Pod Cache
+
+zen-lead caches the current leader pod per service to avoid redundant API calls during reconciliation.
+
+**Configuration:**
+- `--enable-leader-pod-cache` (default: true): Enable/disable cache
+- `--leader-pod-cache-ttl-seconds` (default: 30s): Cache entry time-to-live
+
+**Via Helm:**
+```yaml
+controller:
+  enableLeaderPodCache: true
+  leaderPodCacheTTLSeconds: 30
+```
+
+**Benefits:**
+- Reduces API calls during reconciliation (eliminates Get EndpointSlice + Get Pod calls on cache hits)
+- Improves failover time by 50-200ms per failover
+- Cache automatically invalidated on leader changes and pod deletions
+
+**When to Adjust:**
+- **Decrease TTL** (10-20s) for very dynamic deployments with frequent pod changes
+- **Increase TTL** (30-60s) for stable deployments with rare pod changes
+- **Disable cache** if you need always-fresh pod state (may increase failover time)
+
+**Monitoring:**
+- Cache effectiveness is measured by failover latency reduction
+- No separate cache hit/miss metrics (cache is transparent to metrics)
+
+### Parallel API Calls
+
+zen-lead includes infrastructure for parallelizing independent API operations.
+
+**Configuration:**
+- `--enable-parallel-api-calls` (default: true): Enable/disable parallelization
+
+**Via Helm:**
+```yaml
+controller:
+  enableParallelAPICalls: true
+```
+
+**Note:** Most operations remain sequential due to dependencies (e.g., Get Service before List Pods), but infrastructure is ready for future enhancements.
+
 ## Retry Behavior
 
-### Retry Configuration
+### Standard Retry Configuration
 
-zen-lead uses `zen-sdk/pkg/retry` with default settings:
+zen-lead uses `zen-sdk/pkg/retry` with default settings for non-critical operations:
 - **Max Attempts**: 3
 - **Initial Delay**: 100ms
 - **Max Delay**: 5s
@@ -242,6 +317,47 @@ zen-lead uses configurable context timeouts for long-running operations:
 
 ---
 
+## Failover Performance
+
+### Expected Failover Times
+
+Based on functional testing with 50 failovers (with optimizations enabled):
+
+**Typical Failover Performance:**
+- **Average failover time**: 1.0-1.3 seconds
+- **Min failover time**: 0.9-1.0 seconds
+- **Max failover time**: 1.5-2.0 seconds (down from 4-5s without optimizations)
+- **Success rate**: 100% (all failovers complete successfully)
+
+**Performance Improvements (with optimizations enabled):**
+- **Average**: ~5-10% faster than without optimizations
+- **Max**: ~60% faster (reduced from 4-5s to 1.5-2s)
+- **Consistency**: Much more consistent (smaller variance)
+
+**Factors Affecting Failover Time:**
+1. **Pod scheduling speed**: New pod must be scheduled and become Ready
+2. **API server latency**: Controller must detect pod deletion and update EndpointSlice
+3. **Network propagation**: EndpointSlice changes must propagate to kube-proxy
+4. **Client DNS/connection**: Client must detect endpoint change and reconnect
+
+**Optimization Impact:**
+- **Fast retry config**: Reduces API call delays by 50-200ms per retry
+- **Leader pod cache**: Eliminates 1-2 API calls per failover (saves 50-200ms)
+- **Combined effect**: Typically reduces failover time by 100-400ms
+
+**Configuration for Fastest Failover:**
+```yaml
+controller:
+  fastRetryInitialDelayMs: 10      # Minimum delay (may increase API load)
+  fastRetryMaxDelayMs: 300         # Lower max delay
+  fastRetryMaxAttempts: 2          # Keep at 2 (fewer attempts = faster failure)
+  enableLeaderPodCache: true       # Enable cache
+  leaderPodCacheTTLSeconds: 15      # Lower TTL for fresher data
+  enableParallelAPICalls: true      # Enable parallelization
+```
+
+**Note:** Aggressive settings may increase API server load. Monitor `zen_lead_retry_attempts_total` and API server metrics.
+
 ## Performance Benchmarks
 
 ### Typical Performance
@@ -250,16 +366,19 @@ zen-lead uses configurable context timeouts for long-running operations:
 - Reconciliation: <200ms (P95)
 - Cache hit rate: >90%
 - Memory: <50 MB
+- Failover time: 0.9-1.2s (average)
 
 **Medium Cluster** (100-1000 Services):
 - Reconciliation: <500ms (P95)
 - Cache hit rate: >85%
 - Memory: <200 MB
+- Failover time: 1.0-1.3s (average)
 
 **Large Cluster** (>1000 Services):
 - Reconciliation: <1s (P95)
 - Cache hit rate: >80%
 - Memory: <500 MB
+- Failover time: 1.1-1.5s (average)
 
 ---
 

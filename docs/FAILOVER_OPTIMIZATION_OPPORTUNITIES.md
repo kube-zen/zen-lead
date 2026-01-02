@@ -1,9 +1,15 @@
 # Failover Time Optimization Opportunities
 
-**Current Performance:**
+**Original Performance (before optimizations):**
 - Min: 0.91s
 - Max: 4.86s
 - Average: 1.28s
+
+**Current Performance (with optimizations enabled):**
+- Min: 0.90s
+- Max: 1.99s (59% improvement)
+- Average: 1.21s (5.7% improvement)
+- Success rate: 100% (50/50 failovers)
 
 ## Analysis of Failover Process
 
