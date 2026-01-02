@@ -17,8 +17,8 @@ limitations under the License.
 package metrics
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
 	sdkmetrics "github.com/kube-zen/zen-sdk/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 

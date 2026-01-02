@@ -2057,7 +2057,7 @@ func TestFilterGitOpsAnnotations(t *testing.T) {
 		{
 			name: "filter ArgoCD annotations",
 			annotations: map[string]string{
-				"app":                        "my-app",
+				"app":                          "my-app",
 				"argocd.argoproj.io/sync-wave": "1",
 			},
 			expected: map[string]string{
@@ -2067,8 +2067,8 @@ func TestFilterGitOpsAnnotations(t *testing.T) {
 		{
 			name: "filter Flux annotations",
 			annotations: map[string]string{
-				"app":                        "my-app",
-				"fluxcd.io/sync-checksum":    "abc123",
+				"app":                                  "my-app",
+				"fluxcd.io/sync-checksum":              "abc123",
 				"kustomize.toolkit.fluxcd.io/checksum": "def456",
 			},
 			expected: map[string]string{
@@ -2078,10 +2078,10 @@ func TestFilterGitOpsAnnotations(t *testing.T) {
 		{
 			name: "filter all GitOps annotations",
 			annotations: map[string]string{
-				"app":                        "my-app",
-				"argocd.argoproj.io/sync-wave": "1",
-				"argocd.argoproj.io/sync-options": "Prune=false",
-				"fluxcd.io/sync-checksum":    "abc123",
+				"app":                                  "my-app",
+				"argocd.argoproj.io/sync-wave":         "1",
+				"argocd.argoproj.io/sync-options":      "Prune=false",
+				"fluxcd.io/sync-checksum":              "abc123",
 				"kustomize.toolkit.fluxcd.io/checksum": "def456",
 			},
 			expected: map[string]string{
@@ -2321,10 +2321,10 @@ func TestServiceDirectorReconciler_SelectLeaderPod_StickyAndMinReadyDuration(t *
 
 		leaderPod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pod-1",
-				Namespace: "default",
-				UID:       types.UID("pod-1-uid"),
-				Labels:    map[string]string{"app": "my-app"},
+				Name:              "pod-1",
+				Namespace:         "default",
+				UID:               types.UID("pod-1-uid"),
+				Labels:            map[string]string{"app": "my-app"},
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
 			},
 			Status: corev1.PodStatus{
@@ -2378,7 +2378,7 @@ func TestServiceDirectorReconciler_SelectLeaderPod_StickyAndMinReadyDuration(t *
 				Name:      "my-service",
 				Namespace: "default",
 				Annotations: map[string]string{
-					AnnotationEnabledService:        "true",
+					AnnotationEnabledService:          "true",
 					AnnotationMinReadyDurationService: "30s",
 				},
 			},
@@ -2390,9 +2390,9 @@ func TestServiceDirectorReconciler_SelectLeaderPod_StickyAndMinReadyDuration(t *
 		// Pod that just became ready (less than 30s ago)
 		recentPod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pod-recent",
-				Namespace: "default",
-				Labels:    map[string]string{"app": "my-app"},
+				Name:              "pod-recent",
+				Namespace:         "default",
+				Labels:            map[string]string{"app": "my-app"},
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
 			},
 			Status: corev1.PodStatus{
@@ -2411,9 +2411,9 @@ func TestServiceDirectorReconciler_SelectLeaderPod_StickyAndMinReadyDuration(t *
 		// Pod that has been ready for longer than 30s
 		stablePod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pod-stable",
-				Namespace: "default",
-				Labels:    map[string]string{"app": "my-app"},
+				Name:              "pod-stable",
+				Namespace:         "default",
+				Labels:            map[string]string{"app": "my-app"},
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
 			},
 			Status: corev1.PodStatus{
@@ -2465,9 +2465,9 @@ func TestServiceDirectorReconciler_SelectLeaderPod_StickyAndMinReadyDuration(t *
 
 		pod1 := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "pod-1",
-				Namespace: "default",
-				Labels:    map[string]string{"app": "my-app"},
+				Name:              "pod-1",
+				Namespace:         "default",
+				Labels:            map[string]string{"app": "my-app"},
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
 			},
 			Status: corev1.PodStatus{
