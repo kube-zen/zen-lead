@@ -302,11 +302,160 @@ kubectl auth can-i patch pods --as=system:serviceaccount:<namespace>:zen-lead
 
 ---
 
+## Troubleshooting Runbook
+
+### Quick Diagnostic Commands
+
+```bash
+# Check if controller is running
+kubectl get pods -l app.kubernetes.io/name=zen-lead
+
+# Check controller logs
+kubectl logs -l app.kubernetes.io/name=zen-lead --tail=100
+
+# List all leader Services
+kubectl get services -l app.kubernetes.io/managed-by=zen-lead
+
+# List all managed EndpointSlices
+kubectl get endpointslice -l endpointslice.kubernetes.io/managed-by=zen-lead
+
+# Check metrics endpoint
+kubectl port-forward -l app.kubernetes.io/name=zen-lead 8080:8080
+curl http://localhost:8080/metrics | grep zen_lead
+```
+
+### Common Scenarios
+
+#### Scenario 1: Leader Service Created But No Endpoints
+
+**Symptoms:**
+- Leader Service exists (`<service>-leader`)
+- EndpointSlice exists but has no endpoints
+- Metrics show `zen_lead_leader_service_without_endpoints = 1`
+
+**Diagnosis:**
+```bash
+# Check if pods are Ready
+kubectl get pods -l <selector> -o wide
+
+# Check pod readiness conditions
+kubectl get pods -l <selector> -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+
+# Check controller logs for errors
+kubectl logs -l app.kubernetes.io/name=zen-lead | grep -i error
+```
+
+**Resolution:**
+1. Ensure at least one pod is Ready (readiness probe passing)
+2. Verify Service has a selector
+3. Check controller logs for reconciliation errors
+4. Verify controller has proper RBAC permissions
+
+#### Scenario 2: High Failover Rate
+
+**Symptoms:**
+- Metrics show `rate(zen_lead_failover_count_total[5m]) > 0.1`
+- Leaders changing frequently
+- Alert: `ZenLeadHighFailoverRate`
+
+**Diagnosis:**
+```bash
+# Check failover reasons
+kubectl get events --field-selector involvedObject.name=<service>-leader --sort-by='.lastTimestamp'
+
+# Check pod stability
+kubectl get pods -l <selector> -w
+
+# Check readiness probe configuration
+kubectl get pod <pod-name> -o jsonpath='{.spec.containers[*].readinessProbe}'
+```
+
+**Resolution:**
+1. Review readiness probe configuration (may be too sensitive)
+2. Check pod resource limits (may be causing OOMKilled)
+3. Review node stability (check node conditions)
+4. Consider increasing `zen-lead.io/min-ready-duration` annotation
+
+#### Scenario 3: Slow Reconciliation
+
+**Symptoms:**
+- Metrics show `histogram_quantile(0.95, zen_lead_reconciliation_duration_seconds) > 2`
+- Alert: `ZenLeadSlowReconciliation`
+- Controller logs show slow operations
+
+**Diagnosis:**
+```bash
+# Check API call latency
+kubectl port-forward -l app.kubernetes.io/name=zen-lead 8080:8080
+curl http://localhost:8080/metrics | grep zen_lead_api_call_duration_seconds
+
+# Check API server health
+kubectl get --raw /healthz
+
+# Check controller resource usage
+kubectl top pod -l app.kubernetes.io/name=zen-lead
+```
+
+**Resolution:**
+1. Check API server load (may be overloaded)
+2. Increase `controller.maxConcurrentReconciles` if too low
+3. Check network connectivity to API server
+4. Review controller resource limits
+
+#### Scenario 4: Cache Size Approaching Limit
+
+**Symptoms:**
+- Metrics show `zen_lead_cache_size / 1000 > 0.8`
+- Alert: `ZenLeadCacheSizeApproachingLimit`
+- Cache miss rate increasing
+
+**Diagnosis:**
+```bash
+# Check cache metrics
+kubectl port-forward -l app.kubernetes.io/name=zen-lead 8080:8080
+curl http://localhost:8080/metrics | grep zen_lead_cache
+
+# Count opted-in Services
+kubectl get services --all-namespaces -o json | jq '.items[] | select(.metadata.annotations."zen-lead.io/enabled" == "true") | .metadata.namespace' | sort | uniq -c
+```
+
+**Resolution:**
+1. Increase `controller.maxCacheSizePerNamespace` in Helm chart
+2. Consider namespace sharding if you have >5000 Services per namespace
+3. Monitor cache hit ratio (should be >80%)
+
+#### Scenario 5: High API Call Latency
+
+**Symptoms:**
+- Metrics show `histogram_quantile(0.95, zen_lead_api_call_duration_seconds) > 1`
+- Alert: `ZenLeadHighAPICallLatency`
+- Retry attempts increasing
+
+**Diagnosis:**
+```bash
+# Check API server metrics
+kubectl get --raw /metrics | grep apiserver_request_duration_seconds
+
+# Check for rate limiting
+kubectl logs -l app.kubernetes.io/name=zen-lead | grep -i "rate limit\|too many requests"
+
+# Check controller QPS/Burst settings
+kubectl get deployment zen-lead-controller-manager -o yaml | grep -i qps
+```
+
+**Resolution:**
+1. Check API server load and capacity
+2. Review QPS/Burst settings (default: 20 QPS, 30 Burst)
+3. Reduce `controller.maxConcurrentReconciles` if causing overload
+4. Check network latency to API server
+
+### Performance Tuning
+
+See `docs/PERFORMANCE_TUNING.md` for detailed performance tuning guidance.
+
 ## Getting Help
 
-If you encounter issues not covered here:
-
-1. Check [GitHub Issues](https://github.com/kube-zen/zen-lead/issues)
-2. Review [Architecture Documentation](ARCHITECTURE.md)
-3. Check controller logs: `kubectl logs -l app.kubernetes.io/name=zen-lead`
-4. Review events: `kubectl get events --sort-by='.lastTimestamp'`
+- **Documentation**: See `docs/` directory
+- **Issues**: https://github.com/kube-zen/zen-lead/issues
+- **Metrics**: Check Prometheus metrics endpoint at `:8080/metrics`
+- **Logs**: Controller logs include structured logging with operation context
