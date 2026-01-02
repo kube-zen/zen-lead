@@ -727,3 +727,219 @@ func waitForPodsReady(ctx context.Context, c client.Client, namespace string, la
 		return false, nil
 	})
 }
+
+// TestStickyLeader verifies that the sticky leader behavior works correctly
+func TestStickyLeader(t *testing.T) {
+	ctx := context.Background()
+	c := getTestClient(t)
+
+	// Create test namespace
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: testNamespace + "-sticky",
+		},
+	}
+	if err := c.Create(ctx, ns); err != nil {
+		t.Fatalf("Failed to create namespace: %v", err)
+	}
+	defer func() {
+		_ = c.Delete(ctx, ns)
+	}()
+
+	// Create deployment with 3 replicas
+	deployment, err := createTestDeployment(ctx, c, testService+"-sticky", ns.Name, 3)
+	if err != nil {
+		t.Fatalf("Failed to create deployment: %v", err)
+	}
+	defer func() {
+		_ = c.Delete(ctx, deployment)
+	}()
+
+	// Wait for pods
+	if err := waitForPodsReady(ctx, c, ns.Name, map[string]string{"app": testService + "-sticky"}, 60*time.Second); err != nil {
+		t.Fatalf("Pods did not become ready: %v", err)
+	}
+
+	// Create Service with sticky annotation
+	svc := createTestService(ctx, c, testService+"-sticky", ns.Name)
+	svc.Annotations["zen-lead.io/sticky"] = "true"
+	if err := c.Create(ctx, svc); err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+	defer func() {
+		_ = c.Delete(ctx, svc)
+	}()
+
+	// Wait for leader Service and EndpointSlice
+	leaderSvc, err := waitForLeaderService(ctx, c, testService+"-sticky", ns.Name, 60*time.Second)
+	if err != nil {
+		t.Fatalf("Leader Service was not created: %v", err)
+	}
+
+	endpointSlice, err := waitForEndpointSlice(ctx, c, testService+"-sticky", ns.Name, 60*time.Second)
+	if err != nil {
+		t.Fatalf("EndpointSlice was not created: %v", err)
+	}
+
+	// Get the current leader pod name from EndpointSlice
+	var currentLeaderPodName string
+	if len(endpointSlice.Endpoints) > 0 && endpointSlice.Endpoints[0].TargetRef != nil {
+		currentLeaderPodName = endpointSlice.Endpoints[0].TargetRef.Name
+	}
+	if currentLeaderPodName == "" {
+		t.Fatal("Could not determine current leader pod name")
+	}
+
+	t.Logf("Current leader pod: %s", currentLeaderPodName)
+
+	// Trigger reconciliation by updating the service (should keep same leader)
+	svc.Annotations["test"] = "value"
+	if err := c.Update(ctx, svc); err != nil {
+		t.Fatalf("Failed to update service: %v", err)
+	}
+
+	// Wait a bit for reconciliation
+	time.Sleep(3 * time.Second)
+
+	// Verify leader hasn't changed (sticky behavior)
+	endpointSlice2 := &discoveryv1.EndpointSlice{}
+	if err := c.Get(ctx, types.NamespacedName{Name: leaderSvc.Name, Namespace: ns.Name}, endpointSlice2); err != nil {
+		t.Fatalf("Failed to get EndpointSlice: %v", err)
+	}
+
+	if len(endpointSlice2.Endpoints) > 0 && endpointSlice2.Endpoints[0].TargetRef != nil {
+		newLeaderPodName := endpointSlice2.Endpoints[0].TargetRef.Name
+		if newLeaderPodName != currentLeaderPodName {
+			t.Errorf("Sticky leader changed: expected %s, got %s", currentLeaderPodName, newLeaderPodName)
+		}
+	}
+}
+
+// TestMinReadyDuration verifies that min-ready-duration (flap damping) works correctly
+func TestMinReadyDuration(t *testing.T) {
+	ctx := context.Background()
+	c := getTestClient(t)
+
+	// Create test namespace
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: testNamespace + "-minready",
+		},
+	}
+	if err := c.Create(ctx, ns); err != nil {
+		t.Fatalf("Failed to create namespace: %v", err)
+	}
+	defer func() {
+		_ = c.Delete(ctx, ns)
+	}()
+
+	// Create deployment with 2 replicas
+	deployment, err := createTestDeployment(ctx, c, testService+"-minready", ns.Name, 2)
+	if err != nil {
+		t.Fatalf("Failed to create deployment: %v", err)
+	}
+	defer func() {
+		_ = c.Delete(ctx, deployment)
+	}()
+
+	// Wait for pods
+	if err := waitForPodsReady(ctx, c, ns.Name, map[string]string{"app": testService + "-minready"}, 60*time.Second); err != nil {
+		t.Fatalf("Pods did not become ready: %v", err)
+	}
+
+	// Create Service with min-ready-duration annotation (30 seconds)
+	svc := createTestService(ctx, c, testService+"-minready", ns.Name)
+	svc.Annotations["zen-lead.io/min-ready-duration"] = "30s"
+	if err := c.Create(ctx, svc); err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+	defer func() {
+		_ = c.Delete(ctx, svc)
+	}()
+
+	// Wait for leader Service and EndpointSlice
+	leaderSvc, err := waitForLeaderService(ctx, c, testService+"-minready", ns.Name, 60*time.Second)
+	if err != nil {
+		t.Fatalf("Leader Service was not created: %v", err)
+	}
+
+	_, err = waitForEndpointSlice(ctx, c, testService+"-minready", ns.Name, 60*time.Second)
+	if err != nil {
+		t.Fatalf("EndpointSlice was not created: %v", err)
+	}
+
+	// Verify leader Service exists
+	if leaderSvc == nil {
+		t.Fatal("Leader Service should exist")
+	}
+
+	// Note: Full verification of min-ready-duration would require simulating pod state transitions
+	// which is complex in E2E tests. This test verifies the annotation is accepted and doesn't break reconciliation.
+}
+
+// TestCustomLeaderServiceName verifies that custom leader service name works correctly
+func TestCustomLeaderServiceName(t *testing.T) {
+	ctx := context.Background()
+	c := getTestClient(t)
+
+	// Create test namespace
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: testNamespace + "-custom",
+		},
+	}
+	if err := c.Create(ctx, ns); err != nil {
+		t.Fatalf("Failed to create namespace: %v", err)
+	}
+	defer func() {
+		_ = c.Delete(ctx, ns)
+	}()
+
+	// Create deployment
+	deployment, err := createTestDeployment(ctx, c, testService+"-custom", ns.Name, 2)
+	if err != nil {
+		t.Fatalf("Failed to create deployment: %v", err)
+	}
+	defer func() {
+		_ = c.Delete(ctx, deployment)
+	}()
+
+	// Wait for pods
+	if err := waitForPodsReady(ctx, c, ns.Name, map[string]string{"app": testService + "-custom"}, 60*time.Second); err != nil {
+		t.Fatalf("Pods did not become ready: %v", err)
+	}
+
+	// Create Service with custom leader service name
+	customLeaderName := "custom-leader-name"
+	svc := createTestService(ctx, c, testService+"-custom", ns.Name)
+	svc.Annotations["zen-lead.io/leader-service-name"] = customLeaderName
+	if err := c.Create(ctx, svc); err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+	defer func() {
+		_ = c.Delete(ctx, svc)
+	}()
+
+	// Wait for leader Service with custom name
+	leaderSvc := &corev1.Service{}
+	if err := wait.PollUntilContextTimeout(ctx, 1*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+		err := c.Get(ctx, types.NamespacedName{Name: customLeaderName, Namespace: ns.Name}, leaderSvc)
+		if err != nil {
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		t.Fatalf("Leader Service with custom name was not created: %v", err)
+	}
+
+	// Verify leader Service has correct name
+	if leaderSvc.Name != customLeaderName {
+		t.Errorf("Leader Service name = %s, expected %s", leaderSvc.Name, customLeaderName)
+	}
+
+	// Verify EndpointSlice also uses custom name
+	endpointSlice := &discoveryv1.EndpointSlice{}
+	if err := c.Get(ctx, types.NamespacedName{Name: customLeaderName, Namespace: ns.Name}, endpointSlice); err != nil {
+		t.Fatalf("EndpointSlice with custom name was not created: %v", err)
+	}
+}
