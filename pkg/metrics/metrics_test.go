@@ -18,6 +18,8 @@ package metrics
 
 import (
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // resetGlobalRecorder resets the global recorder for testing
