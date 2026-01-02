@@ -10,7 +10,9 @@
 ✅ **All tests passed successfully**
 
 zen-lead was tested in a real Kubernetes cluster with the following results:
-- **Average failover time:** 1.96 seconds
+- **Min failover time:** 0.91 seconds
+- **Max failover time:** 4.86 seconds
+- **Average failover time:** 1.28 seconds
 - **Success rate:** 100% (50/50 failovers successful)
 - **Leader service creation:** ✅ Working
 - **EndpointSlice management:** ✅ Working
