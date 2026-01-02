@@ -862,7 +862,8 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 
 	// Convert ServicePorts to EndpointPorts (using resolved targetPort)
 	// Note: resolveServicePorts already resolved named ports, so TargetPort should be int here
-	if len(servicePorts) == 0 {
+	// Only validate ports if we have a leader pod (empty ports are OK when no leader)
+	if len(servicePorts) == 0 && leaderPod != nil {
 		return fmt.Errorf("service %s/%s has no ports configured", svc.Namespace, svc.Name)
 	}
 	endpointPorts := make([]discoveryv1.EndpointPort, len(servicePorts))
