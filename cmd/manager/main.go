@@ -75,8 +75,10 @@ func main() {
 	} else {
 		setupLog.Info("OpenTelemetry tracing initialized")
 		defer func() {
-			if err := shutdownTracing(ctx); err != nil {
-				setupLog.Error(err, "Failed to shutdown tracing", sdklog.ErrorCode("TRACING_SHUTDOWN_ERROR"))
+			if shutdownTracing != nil {
+				if err := shutdownTracing(ctx); err != nil {
+					setupLog.Error(err, "Failed to shutdown tracing", sdklog.ErrorCode("TRACING_SHUTDOWN_ERROR"))
+				}
 			}
 		}()
 	}

@@ -18,6 +18,7 @@ package director
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -1051,7 +1052,7 @@ func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, na
 		r.Metrics.RecordLeaderServicesTotal(namespace, len(leaderServiceList.Items))
 	} else {
 		// Check if error was due to timeout
-		if metricsCtx.Err() == context.DeadlineExceeded {
+		if errors.Is(metricsCtx.Err(), context.DeadlineExceeded) {
 			r.Metrics.RecordTimeout(namespace, "metrics_collection")
 		}
 		logger.Debug("Failed to list leader services for metrics", sdklog.String("error", err.Error()), sdklog.String("namespace", namespace))
@@ -1067,7 +1068,7 @@ func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, na
 		r.Metrics.RecordEndpointSlicesTotal(namespace, len(endpointSliceList.Items))
 	} else {
 		// Check if error was due to timeout
-		if metricsCtx.Err() == context.DeadlineExceeded {
+		if errors.Is(metricsCtx.Err(), context.DeadlineExceeded) {
 			r.Metrics.RecordTimeout(namespace, "metrics_collection")
 		}
 		logger.Debug("Failed to list endpoint slices for metrics", sdklog.String("error", err.Error()), sdklog.String("namespace", namespace))
@@ -1113,12 +1114,16 @@ func (r *ServiceDirectorReconciler) cleanupLeaderResources(ctx context.Context, 
 				if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 					return r.Delete(ctx, &leaderServiceList.Items[i])
 				}, r.Metrics, svcName.Namespace, svcName.Name, "delete_leader_service_by_label"); err != nil {
+					sourceService := ""
+					if leaderServiceList.Items[i].Labels != nil {
+						sourceService = leaderServiceList.Items[i].Labels[LabelSourceService]
+					}
 					logger.Error(err, "Failed to delete leader service",
 						sdklog.Operation("delete_service"),
 						sdklog.ErrorCode("DELETE_SERVICE_FAILED"),
 						sdklog.String("namespace", leaderServiceList.Items[i].Namespace),
 						sdklog.String("service", leaderServiceList.Items[i].Name),
-						sdklog.String("source_service", leaderServiceList.Items[i].Labels[LabelSourceService]))
+						sdklog.String("source_service", sourceService))
 				}
 			}
 		}
@@ -1357,7 +1362,7 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 		return r.List(cacheCtx, serviceList, client.InNamespace(namespace))
 	}, r.Metrics, namespace, "", "list_services_cache"); err != nil {
 		// Check if error was due to timeout
-		if cacheCtx.Err() == context.DeadlineExceeded && r.Metrics != nil {
+		if errors.Is(cacheCtx.Err(), context.DeadlineExceeded) && r.Metrics != nil {
 			r.Metrics.RecordTimeout(namespace, "cache_update")
 		}
 		logger.Debug("Failed to list services for cache update",
@@ -1431,8 +1436,11 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCacheForService(svc *co
 		cached := r.optedInServicesCache[svc.Namespace]
 		for i, cachedSvc := range cached {
 			if cachedSvc.name == svc.Name {
-				// Remove from cache (thread-safe)
-				r.optedInServicesCache[svc.Namespace] = append(cached[:i], cached[i+1:]...)
+				// Remove from cache (thread-safe) - create new slice to avoid modifying during iteration
+				newCached := make([]*cachedService, 0, len(cached)-1)
+				newCached = append(newCached, cached[:i]...)
+				newCached = append(newCached, cached[i+1:]...)
+				r.optedInServicesCache[svc.Namespace] = newCached
 				return
 			}
 		}
@@ -1444,7 +1452,11 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCacheForService(svc *co
 		cached := r.optedInServicesCache[svc.Namespace]
 		for i, cachedSvc := range cached {
 			if cachedSvc.name == svc.Name {
-				r.optedInServicesCache[svc.Namespace] = append(cached[:i], cached[i+1:]...)
+				// Remove from cache (thread-safe) - create new slice to avoid modifying during iteration
+				newCached := make([]*cachedService, 0, len(cached)-1)
+				newCached = append(newCached, cached[:i]...)
+				newCached = append(newCached, cached[i+1:]...)
+				r.optedInServicesCache[svc.Namespace] = newCached
 				return
 			}
 		}
