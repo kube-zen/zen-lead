@@ -185,6 +185,25 @@ helm install zen-lead zen-lead/zen-lead \
   --create-namespace
 ```
 
+**Performance Tuning:** zen-lead includes failover performance optimizations enabled by default. You can customize them via Helm values:
+
+```yaml
+controller:
+  # Fast retry config for failover operations
+  fastRetryInitialDelayMs: 20      # Initial delay (default: 20ms)
+  fastRetryMaxDelayMs: 500          # Max delay (default: 500ms)
+  fastRetryMaxAttempts: 2           # Max attempts (default: 2)
+  
+  # Leader pod cache
+  enableLeaderPodCache: true        # Enable cache (default: true)
+  leaderPodCacheTTLSeconds: 30      # Cache TTL (default: 30s)
+  
+  # Parallel API calls
+  enableParallelAPICalls: true      # Enable parallelization (default: true)
+```
+
+See [Performance Tuning Guide](docs/PERFORMANCE_TUNING.md) for detailed configuration options and expected performance.
+
 ### Verify Installation
 
 ```bash
