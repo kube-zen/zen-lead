@@ -12,7 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Configuration:**
 - `--max-cache-size-per-namespace` flag to configure in-memory cache size limit per namespace (default: 1000)
 - `--max-concurrent-reconciles` flag to configure maximum concurrent reconciliations (default: 10)
-- Helm chart support for `controller.maxCacheSizePerNamespace` and `controller.maxConcurrentReconciles` with comprehensive documentation
+- `--cache-update-timeout-seconds` flag to configure timeout for cache update operations (default: 10s)
+- `--metrics-collection-timeout-seconds` flag to configure timeout for metrics collection operations (default: 5s)
+- `--qps` flag to configure Kubernetes API client QPS (queries per second) rate limit (default: 50.0)
+- `--burst` flag to configure Kubernetes API client burst rate limit (default: 100)
+- Helm chart support for all controller configuration parameters with comprehensive documentation
 
 **Observability:**
 - `zen_lead_failover_latency_seconds` histogram metric tracking time from leader unhealthy detection to new leader selected

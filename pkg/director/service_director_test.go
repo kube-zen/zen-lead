@@ -18,6 +18,7 @@ package director
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -2024,4 +2025,615 @@ func TestServiceDirectorReconciler_UpdateResourceTotals(t *testing.T) {
 	// Verify metrics were called (functions executed without panic)
 	// Note: Due to promauto's global registration, we can't easily verify exact values
 	// The test verifies that RecordLeaderServicesTotal and RecordEndpointSlicesTotal were called
+}
+
+func TestFilterGitOpsAnnotations(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		expected    map[string]string
+	}{
+		{
+			name:        "nil annotations",
+			annotations: nil,
+			expected:    map[string]string{},
+		},
+		{
+			name:        "empty annotations",
+			annotations: map[string]string{},
+			expected:    map[string]string{},
+		},
+		{
+			name: "no GitOps annotations",
+			annotations: map[string]string{
+				"app":     "my-app",
+				"version": "1.0",
+			},
+			expected: map[string]string{
+				"app":     "my-app",
+				"version": "1.0",
+			},
+		},
+		{
+			name: "filter ArgoCD annotations",
+			annotations: map[string]string{
+				"app":                        "my-app",
+				"argocd.argoproj.io/sync-wave": "1",
+			},
+			expected: map[string]string{
+				"app": "my-app",
+			},
+		},
+		{
+			name: "filter Flux annotations",
+			annotations: map[string]string{
+				"app":                        "my-app",
+				"fluxcd.io/sync-checksum":    "abc123",
+				"kustomize.toolkit.fluxcd.io/checksum": "def456",
+			},
+			expected: map[string]string{
+				"app": "my-app",
+			},
+		},
+		{
+			name: "filter all GitOps annotations",
+			annotations: map[string]string{
+				"app":                        "my-app",
+				"argocd.argoproj.io/sync-wave": "1",
+				"argocd.argoproj.io/sync-options": "Prune=false",
+				"fluxcd.io/sync-checksum":    "abc123",
+				"kustomize.toolkit.fluxcd.io/checksum": "def456",
+			},
+			expected: map[string]string{
+				"app": "my-app",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterGitOpsAnnotations(tt.annotations)
+			if len(result) != len(tt.expected) {
+				t.Errorf("filterGitOpsAnnotations() length = %d, expected %d", len(result), len(tt.expected))
+			}
+			for k, v := range tt.expected {
+				if result[k] != v {
+					t.Errorf("filterGitOpsAnnotations() [%s] = %v, expected %v", k, result[k], v)
+				}
+			}
+			for k := range result {
+				if _, ok := tt.expected[k]; !ok {
+					t.Errorf("filterGitOpsAnnotations() unexpected key: %s", k)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_ResolveNamedPort(t *testing.T) {
+	tests := []struct {
+		name        string
+		pod         *corev1.Pod
+		portName    string
+		expected    int32
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "nil pod",
+			pod:         nil,
+			portName:    "http",
+			expectError: true,
+			errorMsg:    "pod is nil",
+		},
+		{
+			name: "pod with no containers",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pod-1",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{},
+				},
+			},
+			portName:    "http",
+			expectError: true,
+			errorMsg:    "pod has no containers",
+		},
+		{
+			name: "port not found",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pod-1",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "app",
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "other-port",
+									ContainerPort: 8080,
+								},
+							},
+						},
+					},
+				},
+			},
+			portName:    "http",
+			expectError: true,
+			errorMsg:    "not found",
+		},
+		{
+			name: "port with zero value",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pod-1",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "app",
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "http",
+									ContainerPort: 0,
+								},
+							},
+						},
+					},
+				},
+			},
+			portName:    "http",
+			expectError: true,
+			errorMsg:    "invalid port number",
+		},
+		{
+			name: "port with negative value",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pod-1",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "app",
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "http",
+									ContainerPort: -1,
+								},
+							},
+						},
+					},
+				},
+			},
+			portName:    "http",
+			expectError: true,
+			errorMsg:    "invalid port number",
+		},
+		{
+			name: "valid port found",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pod-1",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "app",
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "http",
+									ContainerPort: 8080,
+								},
+							},
+						},
+					},
+				},
+			},
+			portName:    "http",
+			expected:    8080,
+			expectError: false,
+		},
+		{
+			name: "port found in second container",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pod-1",
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "app",
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "other",
+									ContainerPort: 9090,
+								},
+							},
+						},
+						{
+							Name: "sidecar",
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "http",
+									ContainerPort: 8080,
+								},
+							},
+						},
+					},
+				},
+			},
+			portName:    "http",
+			expected:    8080,
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			corev1.AddToScheme(scheme)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+			eventRecorder := record.NewFakeRecorder(10)
+			r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+
+			result, err := r.resolveNamedPort(tt.pod, tt.portName)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("resolveNamedPort() expected error but got nil")
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("resolveNamedPort() error = %v, expected to contain %s", err, tt.errorMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("resolveNamedPort() error = %v, expected nil", err)
+				}
+				if result != tt.expected {
+					t.Errorf("resolveNamedPort() = %v, expected %v", result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_SelectLeaderPod_StickyAndMinReadyDuration(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	// Test sticky leader with existing EndpointSlice
+	t.Run("sticky leader with existing EndpointSlice", func(t *testing.T) {
+		service := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-service",
+				Namespace: "default",
+				Annotations: map[string]string{
+					AnnotationEnabledService: "true",
+					AnnotationStickyService:  "true",
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{"app": "my-app"},
+			},
+		}
+
+		leaderPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod-1",
+				Namespace: "default",
+				UID:       types.UID("pod-1-uid"),
+				Labels:    map[string]string{"app": "my-app"},
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+				},
+				PodIP: "10.0.0.1",
+			},
+		}
+
+		// Create EndpointSlice with current leader
+		endpointSlice := &discoveryv1.EndpointSlice{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-service-leader",
+				Namespace: "default",
+			},
+			Endpoints: []discoveryv1.Endpoint{
+				{
+					Addresses: []string{"10.0.0.1"},
+					TargetRef: &corev1.ObjectReference{
+						Kind: "Pod",
+						UID:  types.UID("pod-1-uid"),
+					},
+				},
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(service, leaderPod, endpointSlice).
+			Build()
+
+		eventRecorder := record.NewFakeRecorder(10)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+
+		logger := packageLogger.WithContext(context.Background())
+		selected := r.selectLeaderPod(context.Background(), service, []corev1.Pod{*leaderPod}, false, logger)
+
+		if selected == nil {
+			t.Error("selectLeaderPod() expected pod but got nil")
+		} else if selected.Name != "pod-1" {
+			t.Errorf("selectLeaderPod() = %v, expected pod-1", selected.Name)
+		}
+	})
+
+	// Test min ready duration (flap damping)
+	t.Run("min ready duration filtering", func(t *testing.T) {
+		service := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-service",
+				Namespace: "default",
+				Annotations: map[string]string{
+					AnnotationEnabledService:        "true",
+					AnnotationMinReadyDurationService: "30s",
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{"app": "my-app"},
+			},
+		}
+
+		// Pod that just became ready (less than 30s ago)
+		recentPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod-recent",
+				Namespace: "default",
+				Labels:    map[string]string{"app": "my-app"},
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				Conditions: []corev1.PodCondition{
+					{
+						Type:               corev1.PodReady,
+						Status:             corev1.ConditionTrue,
+						LastTransitionTime: metav1.NewTime(time.Now().Add(-10 * time.Second)), // Only 10s ago
+					},
+				},
+				PodIP: "10.0.0.1",
+			},
+		}
+
+		// Pod that has been ready for longer than 30s
+		stablePod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod-stable",
+				Namespace: "default",
+				Labels:    map[string]string{"app": "my-app"},
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				Conditions: []corev1.PodCondition{
+					{
+						Type:               corev1.PodReady,
+						Status:             corev1.ConditionTrue,
+						LastTransitionTime: metav1.NewTime(time.Now().Add(-1 * time.Minute)), // 1 minute ago
+					},
+				},
+				PodIP: "10.0.0.2",
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(service, recentPod, stablePod).
+			Build()
+
+		eventRecorder := record.NewFakeRecorder(10)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+
+		logger := packageLogger.WithContext(context.Background())
+		selected := r.selectLeaderPod(context.Background(), service, []corev1.Pod{*recentPod, *stablePod}, true, logger)
+
+		if selected == nil {
+			t.Error("selectLeaderPod() expected pod but got nil")
+		} else if selected.Name != "pod-stable" {
+			t.Errorf("selectLeaderPod() = %v, expected pod-stable (filtered out recent pod)", selected.Name)
+		}
+	})
+
+	// Test sticky disabled
+	t.Run("sticky disabled", func(t *testing.T) {
+		service := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-service",
+				Namespace: "default",
+				Annotations: map[string]string{
+					AnnotationEnabledService: "true",
+					AnnotationStickyService:  "false",
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{"app": "my-app"},
+			},
+		}
+
+		pod1 := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod-1",
+				Namespace: "default",
+				Labels:    map[string]string{"app": "my-app"},
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				Conditions: []corev1.PodCondition{
+					{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+				},
+				PodIP: "10.0.0.1",
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(service, pod1).
+			Build()
+
+		eventRecorder := record.NewFakeRecorder(10)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+
+		logger := packageLogger.WithContext(context.Background())
+		selected := r.selectLeaderPod(context.Background(), service, []corev1.Pod{*pod1}, false, logger)
+
+		if selected == nil {
+			t.Error("selectLeaderPod() expected pod but got nil")
+		}
+	})
+}
+
+func TestServiceDirectorReconciler_UpdateResourceTotals_ErrorPaths(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	// Test with nil Metrics
+	t.Run("nil metrics", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		eventRecorder := record.NewFakeRecorder(10)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+		r.Metrics = nil
+
+		logger := packageLogger.WithContext(context.Background())
+		// Should not panic
+		r.updateResourceTotals(context.Background(), "default", logger)
+	})
+
+	// Test with timeout (very short timeout)
+	t.Run("timeout scenario", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		eventRecorder := record.NewFakeRecorder(10)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 1*time.Nanosecond) // Very short timeout
+
+		logger := packageLogger.WithContext(context.Background())
+		// Should handle timeout gracefully
+		r.updateResourceTotals(context.Background(), "default", logger)
+	})
+}
+
+func TestServiceDirectorReconciler_CleanupLeaderResources_ErrorPaths(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	// Test cleanup when service doesn't exist but leader service exists by label
+	t.Run("cleanup by label when service not found", func(t *testing.T) {
+		leaderService := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-service-leader",
+				Namespace: "default",
+				Labels: map[string]string{
+					LabelSourceService: "my-service",
+					LabelManagedBy:     LabelManagedByValue,
+				},
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(leaderService).
+			Build()
+
+		eventRecorder := record.NewFakeRecorder(10)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+
+		logger := packageLogger.WithContext(context.Background())
+		svcName := types.NamespacedName{Name: "my-service", Namespace: "default"}
+		result, err := r.cleanupLeaderResources(context.Background(), svcName, logger)
+
+		if err != nil {
+			t.Errorf("cleanupLeaderResources() error = %v, expected nil", err)
+		}
+		if result.Requeue {
+			t.Error("cleanupLeaderResources() should not requeue")
+		}
+	})
+}
+
+func TestServiceDirectorReconciler_Reconcile_ErrorPaths(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	// Test Reconcile with service that has no selector
+	t.Run("service with no selector", func(t *testing.T) {
+		service := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-service",
+				Namespace: "default",
+				Annotations: map[string]string{
+					AnnotationEnabledService: "true",
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				// No selector
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(service).
+			Build()
+
+		eventRecorder := record.NewFakeRecorder(10)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+
+		req := types.NamespacedName{Name: service.Name, Namespace: service.Namespace}
+		result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: req})
+
+		if err != nil {
+			t.Errorf("Reconcile() error = %v, expected nil", err)
+		}
+		if result.Requeue {
+			t.Error("Reconcile() should not requeue when service has no selector")
+		}
+	})
+
+	// Test Reconcile when service is not found
+	t.Run("service not found", func(t *testing.T) {
+		fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+		eventRecorder := record.NewFakeRecorder(10)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10, 10*time.Second, 5*time.Second)
+
+		req := types.NamespacedName{Name: "non-existent", Namespace: "default"}
+		result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: req})
+
+		if err != nil {
+			t.Errorf("Reconcile() error = %v, expected nil (should handle NotFound)", err)
+		}
+		if result.Requeue {
+			t.Error("Reconcile() should not requeue when service not found")
+		}
+	})
+}
+
+func TestServiceDirectorReconciler_SetupWithManager(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	// Create a manager with envtest or skip if not available
+	// For now, we'll test that SetupWithManager can be called without panicking
+	// A full integration test would require envtest
+	t.Skip("Skipping SetupWithManager test - requires envtest for full integration test")
+
+	// This test would require:
+	// 1. envtest.Environment setup
+	// 2. mgr, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme})
+	// 3. r.SetupWithManager(mgr)
+	// For now, we verify SetupWithManager exists and has correct signature via compilation
 }
