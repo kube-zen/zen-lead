@@ -32,6 +32,7 @@ import (
 	"github.com/kube-zen/zen-lead/pkg/director"
 	"github.com/kube-zen/zen-sdk/pkg/leader"
 	sdklog "github.com/kube-zen/zen-sdk/pkg/logging"
+	"github.com/kube-zen/zen-sdk/pkg/observability"
 )
 
 var (
@@ -65,8 +66,20 @@ func main() {
 	logger = sdklog.NewLogger("zen-lead")
 	setupLog = logger.WithComponent("setup")
 
-	// OpenTelemetry tracing initialization can be added here when zen-sdk/pkg/observability is available
-	// For now, continue without tracing
+	// Initialize OpenTelemetry tracing (optional, uses environment variables)
+	ctx := ctrl.SetupSignalHandler()
+	shutdownTracing, err := observability.InitWithDefaults(ctx, "zen-lead")
+	if err != nil {
+		setupLog.Warn("Failed to initialize OpenTelemetry tracing", sdklog.ErrorCode("TRACING_INIT_ERROR"), sdklog.String("error", err.Error()))
+		setupLog.Info("Continuing without tracing")
+	} else {
+		setupLog.Info("OpenTelemetry tracing initialized")
+		defer func() {
+			if err := shutdownTracing(ctx); err != nil {
+				setupLog.Error(err, "Failed to shutdown tracing", sdklog.ErrorCode("TRACING_SHUTDOWN_ERROR"))
+			}
+		}()
+	}
 
 	// Get pod namespace (required for leader election)
 	leaderElectionNS, err := leader.RequirePodNamespace()

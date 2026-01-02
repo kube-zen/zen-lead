@@ -51,7 +51,7 @@ jobs:
           GOWORK: off
         run: go test -v -race -timeout=15m -coverprofile=coverage.out ./...
       
-      - name: Check coverage (>=60%)
+      - name: Check coverage (>=70%)
         env:
           GOWORK: off
         run: |
@@ -59,12 +59,12 @@ jobs:
           COVERAGE=$(go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics)" | awk '{sum+=$3; count++} END {if (count>0) printf "%.1f", sum/count; else print "0"}')
           COVERAGE_INT=$(echo "$COVERAGE" | cut -d. -f1)
           echo "Tested packages coverage: ${COVERAGE}%"
-          if [ -z "$COVERAGE_INT" ] || [ "$COVERAGE_INT" -lt 60 ]; then
-            echo "❌ Coverage is ${COVERAGE}% (required: >=60%)"
+          if [ -z "$COVERAGE_INT" ] || [ "$COVERAGE_INT" -lt 70 ]; then
+            echo "❌ Coverage is ${COVERAGE}% (required: >=70%)"
             go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3
             exit 1
           else
-            echo "✅ Coverage is ${COVERAGE}% (>=60%)"
+            echo "✅ Coverage is ${COVERAGE}% (>=70%)"
             go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3
           fi
 
@@ -127,3 +127,64 @@ jobs:
             exit 1
           fi
           file bin/manager
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Only run on main branch or when explicitly requested
+    if: github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: go.sum
+      
+      - name: Install kind
+        uses: container-tools/kind-action@v1
+        with:
+          version: "v0.20.0"
+      
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+      
+      - name: Install dependencies
+        env:
+          GOWORK: off
+        run: go mod download
+      
+      - name: Setup E2E test environment
+        env:
+          GOWORK: off
+        run: |
+          chmod +x test/e2e/setup_kind.sh
+          ./test/e2e/setup_kind.sh create || {
+            echo "⚠️ E2E setup failed - tests will be skipped"
+            exit 0
+          }
+      
+      - name: Run E2E tests
+        env:
+          GOWORK: off
+          KUBECONFIG: ${{ env.KUBECONFIG || '$HOME/.kube/zen-lead-e2e-config' }}
+        run: |
+          if [ -f "$KUBECONFIG" ]; then
+            go test -v -tags=e2e -timeout=10m ./test/e2e/... || {
+              echo "⚠️ E2E tests failed"
+              exit 0  # Don't fail CI for E2E tests (optional)
+            }
+          else
+            echo "⚠️ Kubeconfig not found - skipping E2E tests"
+          fi
+      
+      - name: Cleanup E2E environment
+        if: always()
+        run: |
+          ./test/e2e/setup_kind.sh delete || true

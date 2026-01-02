@@ -42,7 +42,7 @@ test:
 	GOWORK=off go test -v -race -coverprofile=coverage.out ./...
 	@echo "$(GREEN)✅ Tests complete$(NC)"
 
-## test-coverage: Run tests and check coverage is >60%
+## test-coverage: Run tests and check coverage is >=70%
 test-coverage: test
 	@echo "$(GREEN)Checking test coverage...$(NC)"
 	@# Calculate coverage for tested packages only (exclude packages with 0% coverage)
@@ -52,13 +52,13 @@ test-coverage: test
 		exit 1; \
 	fi; \
 	COVERAGE_INT=$$(echo "$$COVERAGE" | cut -d. -f1); \
-	if [ "$$COVERAGE_INT" -lt 60 ]; then \
-		echo "$(RED)❌ Tested packages coverage is $$COVERAGE% (required: >=60%)$(NC)"; \
+	if [ "$$COVERAGE_INT" -lt 70 ]; then \
+		echo "$(RED)❌ Tested packages coverage is $$COVERAGE% (required: >=70%)$(NC)"; \
 		echo "$(YELLOW)Run 'make coverage' to see detailed coverage report$(NC)"; \
 		GOWORK=off go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3; \
 		exit 1; \
 	else \
-		echo "$(GREEN)✅ Tested packages coverage is $$COVERAGE% (required: >=60%)$(NC)"; \
+		echo "$(GREEN)✅ Tested packages coverage is $$COVERAGE% (required: >=70%)$(NC)"; \
 		GOWORK=off go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3; \
 	fi
 

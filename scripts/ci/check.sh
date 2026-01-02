@@ -105,7 +105,7 @@ if [ -f "$SCRIPT_DIR/go.mod" ]; then
         echo "  ✅ No 'replace' directives in go.mod"
     fi
     
-    # Check test coverage (must be >=60% for tested packages)
+    # Check test coverage (must be >=70% for tested packages)
     echo ""
     echo "Checking test coverage..."
     if [ -f "$SCRIPT_DIR/Makefile" ] && grep -q "^test-coverage:" "$SCRIPT_DIR/Makefile"; then
@@ -115,10 +115,10 @@ if [ -f "$SCRIPT_DIR/go.mod" ]; then
             # Calculate coverage for tested packages only (exclude packages with 0% coverage)
             COVERAGE=$(GOWORK=off go tool cover -func=coverage.out 2>/dev/null | grep -E "(pkg/director|pkg/metrics)" | awk '{sum+=$3; count++} END {if (count>0) printf "%.1f", sum/count; else print "0"}' || echo "0")
             COVERAGE_INT=$(echo "$COVERAGE" | cut -d. -f1)
-            if [ -n "$COVERAGE_INT" ] && [ "$COVERAGE_INT" -ge 60 ]; then
-                echo "  ✅ Tested packages coverage: ${COVERAGE}% (>=60%)"
+            if [ -n "$COVERAGE_INT" ] && [ "$COVERAGE_INT" -ge 70 ]; then
+                echo "  ✅ Tested packages coverage: ${COVERAGE}% (>=70%)"
             else
-                echo "  ❌ Tested packages coverage: ${COVERAGE}% (required: >=60%)"
+                echo "  ❌ Tested packages coverage: ${COVERAGE}% (required: >=70%)"
                 echo "     Run 'make test-coverage' for details"
                 FAILED=1
             fi

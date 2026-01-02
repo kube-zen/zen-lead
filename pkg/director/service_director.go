@@ -43,7 +43,10 @@ import (
 
 	"github.com/kube-zen/zen-lead/pkg/metrics"
 	sdklog "github.com/kube-zen/zen-sdk/pkg/logging"
+	"github.com/kube-zen/zen-sdk/pkg/observability"
 	"github.com/kube-zen/zen-sdk/pkg/retry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Package-level logger to avoid repeated allocations (pattern from zen-sdk)
@@ -164,6 +167,9 @@ type ServiceDirectorReconciler struct {
 	// Protected by cacheMu for concurrent access
 	cacheMu              sync.RWMutex
 	optedInServicesCache map[string][]*cachedService
+	
+	// maxCacheSizePerNamespace limits the number of cached services per namespace (0 = unlimited)
+	maxCacheSizePerNamespace int
 }
 
 // cachedService holds a Service's selector for efficient matching
@@ -175,17 +181,28 @@ type cachedService struct {
 // NewServiceDirectorReconciler creates a new ServiceDirectorReconciler
 func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder) *ServiceDirectorReconciler {
 	return &ServiceDirectorReconciler{
-		Client:               client,
-		Scheme:               scheme,
-		Recorder:             recorder,
-		Metrics:              metrics.NewRecorder(),
-		optedInServicesCache: make(map[string][]*cachedService),
+		Client:                    client,
+		Scheme:                    scheme,
+		Recorder:                  recorder,
+		Metrics:                   metrics.NewRecorder(),
+		optedInServicesCache:      make(map[string][]*cachedService),
+		maxCacheSizePerNamespace:  1000, // Default: 1000 services per namespace (configurable via env var in future)
 	}
 }
 
 // Reconcile reconciles a Service with zen-lead.io/enabled annotation
 func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	startTime := time.Now()
+	
+	// Create tracing span for reconciliation
+	tracer := observability.GetTracer("zen-lead-service-director")
+	ctx, span := tracer.Start(ctx, "reconcile",
+		trace.WithAttributes(
+			attribute.String("namespace", req.Namespace),
+			attribute.String("service", req.Name),
+		))
+	defer span.End()
+	
 	// Use package-level logger to avoid allocation (pattern from zen-sdk)
 	logger := packageLogger.WithContext(ctx).WithFields(map[string]interface{}{
 		"namespace": req.Namespace,
@@ -194,9 +211,9 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Fetch the Service (with retry for transient errors)
 	svc := &corev1.Service{}
-	if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 		return r.Get(ctx, req.NamespacedName, svc)
-	}); err != nil {
+	}, r.Metrics, req.Namespace, req.Name, "get_service"); err != nil {
 		// Update cache on Service deletion
 		r.updateOptedInServicesCache(ctx, req.Namespace, logger)
 		// Service not found - cleanup leader resources
@@ -247,9 +264,9 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Find pods matching the Service selector (with retry for transient errors)
 	podList := &corev1.PodList{}
-	if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 		return r.List(ctx, podList, client.InNamespace(svc.Namespace), client.MatchingLabels(svc.Spec.Selector))
-	}); err != nil {
+	}, r.Metrics, svc.Namespace, svc.Name, "list_pods"); err != nil {
 		logger.Error(err, "Failed to list pods for service",
 			sdklog.Operation("list_pods"),
 			sdklog.ErrorCode("LIST_PODS_FAILED"),
@@ -414,9 +431,9 @@ func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc
 		Namespace: svc.Namespace,
 	}
 
-	if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 		return r.Get(ctx, endpointSliceKey, endpointSlice)
-	}); err != nil {
+	}, r.Metrics, svc.Namespace, svc.Name, "get_endpointslice"); err != nil {
 		return nil
 	}
 
@@ -428,9 +445,9 @@ func (r *ServiceDirectorReconciler) getCurrentLeaderPod(ctx context.Context, svc
 				Name:      endpoint.TargetRef.Name,
 				Namespace: endpoint.TargetRef.Namespace,
 			}
-			if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+			if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 				return r.Get(ctx, podKey, pod)
-			}); err == nil {
+			}, r.Metrics, svc.Namespace, svc.Name, "get_pod"); err == nil {
 				// Verify UID matches (pod may have been recreated with same name)
 				if string(pod.UID) == string(endpoint.TargetRef.UID) {
 					return pod
@@ -463,9 +480,9 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 			Namespace: svc.Namespace,
 		}
 
-		if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+		if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 			return r.Get(ctx, endpointSliceKey, endpointSlice)
-		}); err == nil {
+		}, r.Metrics, svc.Namespace, svc.Name, "get_endpointslice_sticky"); err == nil {
 			// Found existing EndpointSlice - check if current leader is still Ready (match by UID)
 			for _, endpoint := range endpointSlice.Endpoints {
 				if endpoint.TargetRef != nil && endpoint.TargetRef.Kind == "Pod" && endpoint.TargetRef.UID != "" {
@@ -548,6 +565,15 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 
 // reconcileLeaderService creates or updates the selector-less leader Service and EndpointSlice
 func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, svc *corev1.Service, leaderPod *corev1.Pod, logger *sdklog.Logger) error {
+	// Create tracing span
+	tracer := observability.GetTracer("zen-lead-service-director")
+	ctx, span := tracer.Start(ctx, "reconcile_leader_service",
+		trace.WithAttributes(
+			attribute.String("namespace", svc.Namespace),
+			attribute.String("service", svc.Name),
+		))
+	defer span.End()
+	
 	leaderServiceName := r.getLeaderServiceName(svc)
 
 	// Create or update selector-less leader Service
@@ -580,12 +606,12 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 			Namespace: svc.Namespace,
 		}
 		existingSlice := &discoveryv1.EndpointSlice{}
-		if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+		if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 			return r.Get(ctx, endpointSliceKey, existingSlice)
-		}); err == nil {
-			if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+		}, r.Metrics, svc.Namespace, svc.Name, "get_endpointslice_cleanup"); err == nil {
+			if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 				return r.Delete(ctx, existingSlice)
-			}); err != nil {
+			}, r.Metrics, svc.Namespace, svc.Name, "delete_endpointslice"); err != nil {
 				logger.Error(err, "Failed to delete EndpointSlice after port resolution failure",
 					sdklog.String("namespace", svc.Namespace),
 					sdklog.String("service", svc.Name),
@@ -603,9 +629,9 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 		leaderPod = nil // Prevent EndpointSlice creation
 	}
 
-	if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 		return r.Get(ctx, leaderServiceKey, leaderService)
-	}); err != nil {
+	}, r.Metrics, svc.Namespace, svc.Name, "get_leader_service"); err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("failed to get leader service %s/%s: %w", leaderServiceKey.Namespace, leaderServiceKey.Name, err)
 		}
@@ -658,9 +684,9 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 			leaderService.Spec.Type = corev1.ServiceTypeClusterIP
 		}
 
-		if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+		if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 			return r.Create(ctx, leaderService)
-		}); err != nil {
+		}, r.Metrics, svc.Namespace, svc.Name, "create_leader_service"); err != nil {
 			return fmt.Errorf("failed to create leader service %s/%s for source service %s/%s: %w",
 				leaderService.Namespace, leaderService.Name, svc.Namespace, svc.Name, err)
 		}
@@ -725,9 +751,9 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 			// Keep last switch time for debugging
 		}
 
-		if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+		if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 			return r.Patch(ctx, leaderService, client.MergeFrom(originalService))
-		}); err != nil {
+		}, r.Metrics, svc.Namespace, svc.Name, "patch_leader_service"); err != nil {
 			return fmt.Errorf("failed to patch leader service: %w", err)
 		}
 	}
@@ -802,6 +828,15 @@ func (r *ServiceDirectorReconciler) resolveNamedPort(pod *corev1.Pod, portName s
 
 // reconcileEndpointSlice creates or updates EndpointSlice pointing to leader pod
 func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, svc *corev1.Service, leaderServiceName string, leaderPod *corev1.Pod, servicePorts []corev1.ServicePort, logger *sdklog.Logger) error {
+	// Create tracing span
+	tracer := observability.GetTracer("zen-lead-service-director")
+	ctx, span := tracer.Start(ctx, "reconcile_endpointslice",
+		trace.WithAttributes(
+			attribute.String("namespace", svc.Namespace),
+			attribute.String("service", svc.Name),
+		))
+	defer span.End()
+	
 	endpointSliceName := leaderServiceName
 	endpointSlice := &discoveryv1.EndpointSlice{}
 	endpointSliceKey := types.NamespacedName{
@@ -893,9 +928,9 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 		TargetRef: targetRef,
 	}
 
-	if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 		return r.Get(ctx, endpointSliceKey, endpointSlice)
-	}); err != nil {
+	}, r.Metrics, svc.Namespace, svc.Name, "get_endpointslice_reconcile"); err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("failed to get endpoint slice %s/%s for service %s/%s: %w",
 				endpointSliceKey.Namespace, endpointSliceKey.Name, svc.Namespace, svc.Name, err)
@@ -920,9 +955,9 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 						Name:       leaderServiceName,
 						UID: func() types.UID {
 							leaderSvc := &corev1.Service{}
-							if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+							if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 								return r.Get(ctx, types.NamespacedName{Name: leaderServiceName, Namespace: svc.Namespace}, leaderSvc)
-							}); err == nil {
+							}, r.Metrics, svc.Namespace, svc.Name, "get_leader_service_validation"); err == nil {
 								return leaderSvc.UID
 							}
 							return ""
@@ -936,9 +971,9 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 			Ports:       endpointPorts,
 		}
 
-		if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+		if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 			return r.Create(ctx, endpointSlice)
-		}); err != nil {
+		}, r.Metrics, svc.Namespace, svc.Name, "create_endpointslice"); err != nil {
 			// Record endpoint write error
 			if r.Metrics != nil {
 				r.Metrics.RecordEndpointWriteError(svc.Namespace, svc.Name)
@@ -974,9 +1009,9 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 	endpointSlice.Ports = endpointPorts
 	endpointSlice.AddressType = addressType
 
-	if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 		return r.Patch(ctx, endpointSlice, client.MergeFrom(originalEndpointSlice))
-	}); err != nil {
+	}, r.Metrics, svc.Namespace, svc.Name, "patch_endpointslice"); err != nil {
 		// Record endpoint write error
 		if r.Metrics != nil {
 			r.Metrics.RecordEndpointWriteError(svc.Namespace, svc.Name)
@@ -1008,11 +1043,11 @@ func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, na
 
 	// Count leader Services (selector-less Services with zen-lead managed-by label)
 	leaderServiceList := &corev1.ServiceList{}
-	if err := retry.Do(metricsCtx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(metricsCtx, retry.DefaultConfig(), func() error {
 		return r.List(metricsCtx, leaderServiceList, client.InNamespace(namespace), client.MatchingLabels{
 			LabelManagedBy: LabelManagedByValue,
 		})
-	}); err == nil {
+	}, r.Metrics, namespace, "", "list_leader_services_metrics"); err == nil {
 		r.Metrics.RecordLeaderServicesTotal(namespace, len(leaderServiceList.Items))
 	} else {
 		// Check if error was due to timeout
@@ -1024,11 +1059,11 @@ func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, na
 
 	// Count EndpointSlices (with zen-lead managed-by label)
 	endpointSliceList := &discoveryv1.EndpointSliceList{}
-	if err := retry.Do(metricsCtx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(metricsCtx, retry.DefaultConfig(), func() error {
 		return r.List(metricsCtx, endpointSliceList, client.InNamespace(namespace), client.MatchingLabels{
 			LabelEndpointSliceManagedBy: LabelEndpointSliceManagedByValue,
 		})
-	}); err == nil {
+	}, r.Metrics, namespace, "", "list_endpointslices_metrics"); err == nil {
 		r.Metrics.RecordEndpointSlicesTotal(namespace, len(endpointSliceList.Items))
 	} else {
 		// Check if error was due to timeout
@@ -1043,9 +1078,9 @@ func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, na
 func (r *ServiceDirectorReconciler) cleanupLeaderResources(ctx context.Context, svcName types.NamespacedName, logger *sdklog.Logger) (ctrl.Result, error) {
 	// Try to determine leader service name (best effort)
 	svc := &corev1.Service{}
-	if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 		return r.Get(ctx, svcName, svc)
-	}); err == nil {
+	}, r.Metrics, svcName.Namespace, svcName.Name, "get_service_cleanup"); err == nil {
 		leaderServiceName := r.getLeaderServiceName(svc)
 		leaderServiceKey := types.NamespacedName{
 			Name:      leaderServiceName,
@@ -1054,12 +1089,12 @@ func (r *ServiceDirectorReconciler) cleanupLeaderResources(ctx context.Context, 
 
 		// Delete leader Service (GC will delete EndpointSlice via ownerRef)
 		leaderService := &corev1.Service{}
-		if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+		if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 			return r.Get(ctx, leaderServiceKey, leaderService)
-		}); err == nil {
-			if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+		}, r.Metrics, svcName.Namespace, svcName.Name, "get_leader_service_cleanup"); err == nil {
+			if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 				return r.Delete(ctx, leaderService)
-			}); err != nil {
+			}, r.Metrics, svcName.Namespace, svcName.Name, "delete_leader_service"); err != nil {
 				logger.Error(err, "Failed to delete leader service", sdklog.String("service", leaderServiceName))
 				return ctrl.Result{}, err
 			}
@@ -1068,16 +1103,16 @@ func (r *ServiceDirectorReconciler) cleanupLeaderResources(ctx context.Context, 
 	} else {
 		// Service doesn't exist - try to find and delete leader service by label
 		leaderServiceList := &corev1.ServiceList{}
-		if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+		if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 			return r.List(ctx, leaderServiceList, client.InNamespace(svcName.Namespace), client.MatchingLabels{
 				LabelSourceService: svcName.Name,
 				LabelManagedBy:     LabelManagedByValue,
 			})
-		}); err == nil {
+		}, r.Metrics, svcName.Namespace, svcName.Name, "list_leader_services_cleanup"); err == nil {
 			for i := range leaderServiceList.Items {
-				if err := retry.Do(ctx, retry.DefaultConfig(), func() error {
+				if err := retryDoWithMetrics(ctx, retry.DefaultConfig(), func() error {
 					return r.Delete(ctx, &leaderServiceList.Items[i])
-				}); err != nil {
+				}, r.Metrics, svcName.Namespace, svcName.Name, "delete_leader_service_by_label"); err != nil {
 					logger.Error(err, "Failed to delete leader service",
 						sdklog.Operation("delete_service"),
 						sdklog.ErrorCode("DELETE_SERVICE_FAILED"),
@@ -1318,9 +1353,9 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 	defer cancel()
 
 	serviceList := &corev1.ServiceList{}
-	if err := retry.Do(cacheCtx, retry.DefaultConfig(), func() error {
+	if err := retryDoWithMetrics(cacheCtx, retry.DefaultConfig(), func() error {
 		return r.List(cacheCtx, serviceList, client.InNamespace(namespace))
-	}); err != nil {
+	}, r.Metrics, namespace, "", "list_services_cache"); err != nil {
 		// Check if error was due to timeout
 		if cacheCtx.Err() == context.DeadlineExceeded && r.Metrics != nil {
 			r.Metrics.RecordTimeout(namespace, "cache_update")
@@ -1349,6 +1384,20 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 			selector: selector,
 		})
 	}
+	
+	// Apply cache size limit (LRU eviction: keep oldest services)
+	if r.maxCacheSizePerNamespace > 0 && len(cached) > r.maxCacheSizePerNamespace {
+		// Sort by service name (deterministic) and keep first N
+		sort.Slice(cached, func(i, j int) bool {
+			return cached[i].name < cached[j].name
+		})
+		cached = cached[:r.maxCacheSizePerNamespace]
+		logger.Debug("Cache size limit applied",
+			sdklog.String("namespace", namespace),
+			sdklog.Int("limit", r.maxCacheSizePerNamespace),
+			sdklog.Int("cached", len(cached)))
+	}
+	
 	r.cacheMu.Lock()
 	// Initialize map if nil (defensive programming)
 	if r.optedInServicesCache == nil {

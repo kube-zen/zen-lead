@@ -188,3 +188,68 @@ func TestRecordReconciliation(t *testing.T) {
 
 	// Function executed without panic - test passes
 }
+
+func TestRecordLeaderStable(t *testing.T) {
+	recorder := NewRecorder()
+
+	// Record leader stability - should not panic
+	recorder.RecordLeaderStable("default", "my-service", true)
+	recorder.RecordLeaderStable("default", "my-service", false)
+
+	// Function executed without panic - test passes
+}
+
+func TestRecordEndpointWriteError(t *testing.T) {
+	recorder := NewRecorder()
+
+	// Record endpoint write error - should not panic
+	recorder.RecordEndpointWriteError("default", "my-service")
+	recorder.RecordEndpointWriteError("default", "my-service")
+
+	// Function executed without panic - test passes
+}
+
+func TestRecordCacheMetrics(t *testing.T) {
+	recorder := NewRecorder()
+
+	// Test cache metrics
+	recorder.RecordCacheSize("default", 5)
+	recorder.RecordCacheSize("default", 10)
+	recorder.RecordCacheUpdateDuration("default", 0.5)
+	recorder.RecordCacheHit("default")
+	recorder.RecordCacheMiss("default")
+	recorder.RecordTimeout("default", "cache_update")
+	recorder.RecordTimeout("default", "metrics_collection")
+
+	// Function executed without panic - test passes
+}
+
+func TestMetricsEdgeCases(t *testing.T) {
+	recorder := NewRecorder()
+
+	// Test with empty strings
+	recorder.RecordFailover("", "", "")
+	recorder.RecordReconciliationError("", "", "")
+	recorder.RecordPortResolutionFailure("", "", "")
+	recorder.RecordLeaderSelectionAttempt("", "")
+	recorder.RecordReconciliation("", "", "")
+
+	// Test with negative values (should still work)
+	recorder.RecordPodsAvailable("default", "my-service", -1)
+	recorder.RecordLeaderServicesTotal("default", -1)
+	recorder.RecordEndpointSlicesTotal("default", -1)
+	recorder.RecordCacheSize("default", -1)
+
+	// Test with zero values
+	recorder.RecordPodsAvailable("default", "my-service", 0)
+	recorder.RecordLeaderServicesTotal("default", 0)
+	recorder.RecordEndpointSlicesTotal("default", 0)
+	recorder.RecordCacheSize("default", 0)
+
+	// Test with very large values
+	recorder.RecordPodsAvailable("default", "my-service", 10000)
+	recorder.RecordLeaderServicesTotal("default", 10000)
+	recorder.RecordCacheSize("default", 10000)
+
+	// Should not panic
+}
