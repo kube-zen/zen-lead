@@ -186,12 +186,26 @@ rules:
 - **Event-Driven:** Reconciliation triggered by Service/Pod/EndpointSlice changes
 - **No Polling:** Controller doesn't poll, only reacts to events
 - **Fast Failover:** Bounded by readiness transition + controller reconcile + kube-proxy update (~2-5 seconds)
+- **Configurable Concurrency:** `maxConcurrentReconciles` controls parallel reconciliation (default: 10)
 
 ### Resource Usage
 
 - **Minimal Overhead:** Just Service and EndpointSlice management
 - **Scales Linearly:** With number of opted-in Services
 - **No Additional Goroutines:** Beyond controller-runtime defaults
+- **In-Memory Cache:** LRU cache for opted-in Services (default: 1000 per namespace, configurable)
+
+### Configuration
+
+Key performance-related configuration options:
+- `maxCacheSizePerNamespace`: Cache size limit per namespace (default: 1000)
+- `maxConcurrentReconciles`: Maximum concurrent reconciliations (default: 10)
+- `cacheUpdateTimeoutSeconds`: Timeout for cache updates (default: 10s)
+- `metricsCollectionTimeoutSeconds`: Timeout for metrics collection (default: 5s)
+- `qps`: Kubernetes API client QPS (default: 50)
+- `burst`: Kubernetes API client burst limit (default: 100)
+
+See `docs/PERFORMANCE_TUNING.md` for detailed tuning guidance.
 
 ## Limitations
 

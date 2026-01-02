@@ -19,8 +19,8 @@ zen-lead maintains an in-memory cache of opted-in Services per namespace to opti
 
 **Configuration:**
 - Default: 1000 services per namespace
-- Configurable: Set via `maxCacheSizePerNamespace` field (future: environment variable)
-- Eviction: LRU-style (keeps oldest services when limit exceeded)
+- Configurable: Set via `--max-cache-size-per-namespace` flag or Helm `controller.maxCacheSizePerNamespace`
+- Eviction: LRU-style (keeps most recently accessed services when limit exceeded)
 
 **When to Adjust:**
 - **Increase limit** if you have >1000 opted-in Services per namespace
@@ -28,9 +28,15 @@ zen-lead maintains an in-memory cache of opted-in Services per namespace to opti
 - **Monitor**: Use `zen_lead_cache_size` metric to track cache growth
 
 **Example:**
-```go
-// In NewServiceDirectorReconciler (future: via env var)
-maxCacheSizePerNamespace: 5000, // For large namespaces
+```yaml
+# Helm chart values.yaml
+controller:
+  maxCacheSizePerNamespace: 5000  # For large namespaces
+```
+
+Or via command-line flag:
+```bash
+--max-cache-size-per-namespace=5000
 ```
 
 ---
@@ -39,14 +45,19 @@ maxCacheSizePerNamespace: 5000, // For large namespaces
 
 ### QPS and Burst Limits
 
-zen-lead uses `zen-sdk/pkg/leader` which applies default QPS/Burst settings:
-- **QPS**: 20 requests/second
-- **Burst**: 30 requests
+zen-lead configures Kubernetes API client QPS/Burst settings:
+- **QPS**: 50 requests/second (default, configurable via `--qps` flag or Helm `controller.qps`)
+- **Burst**: 100 requests (default, configurable via `--burst` flag or Helm `controller.burst`)
+
+**Configuration:**
+- Via Helm chart: Set `controller.qps` and `controller.burst` in `values.yaml`
+- Via command-line flags: `--qps` and `--burst`
+- Defaults are higher than controller-runtime defaults (20/30) for better throughput
 
 **When to Adjust:**
-- **Increase** if you see rate limiting errors
-- **Decrease** if API server is overloaded
-- **Monitor**: Watch for `zen_lead_retry_attempts_total` spikes
+- **Increase** if you have many Services and need faster reconciliation
+- **Decrease** if you see rate limiting errors (429) or API server overload
+- **Monitor**: Watch for `zen_lead_retry_attempts_total` spikes and `zen_lead_api_call_duration_seconds`
 
 **Configuration:**
 - Set via `leader.ApplyRestConfigDefaults()` in `cmd/manager/main.go`

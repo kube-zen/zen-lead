@@ -22,7 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced Prometheus alerting rules (cache size approaching limit, high API call latency, controller restart frequency)
 
 **Documentation:**
-- Comprehensive improvement suggestions document (`docs/IMPROVEMENT_SUGGESTIONS.md`)
 - Cache tuning guidance in Helm chart values.yaml
 - Cache size configuration examples in Helm chart README
 
