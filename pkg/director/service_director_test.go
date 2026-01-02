@@ -825,10 +825,13 @@ func TestServiceDirectorReconciler_GetCurrentLeaderPod(t *testing.T) {
 			recorder := metrics.NewRecorder()
 			eventRecorder := record.NewFakeRecorder(10)
 			r := &ServiceDirectorReconciler{
-				Client:   fakeClient,
-				Scheme:   scheme,
-				Recorder: eventRecorder,
-				Metrics:  recorder,
+				Client:                   fakeClient,
+				Scheme:                   scheme,
+				Recorder:                 eventRecorder,
+				Metrics:                  recorder,
+				optedInServicesCache:     make(map[string][]*cachedService),
+				cacheUpdateTimeout:       10 * time.Second,
+				metricsCollectionTimeout: 5 * time.Second,
 			}
 
 			// Test getCurrentLeaderPod
@@ -1003,10 +1006,13 @@ func TestServiceDirectorReconciler_SelectLeaderPod(t *testing.T) {
 			recorder := metrics.NewRecorder()
 			eventRecorder := record.NewFakeRecorder(10)
 			r := &ServiceDirectorReconciler{
-				Client:   fakeClient,
-				Scheme:   scheme,
-				Recorder: eventRecorder,
-				Metrics:  recorder,
+				Client:                   fakeClient,
+				Scheme:                   scheme,
+				Recorder:                 eventRecorder,
+				Metrics:                  recorder,
+				optedInServicesCache:     make(map[string][]*cachedService),
+				cacheUpdateTimeout:       10 * time.Second,
+				metricsCollectionTimeout: 5 * time.Second,
 			}
 
 			// Test selectLeaderPod
@@ -1120,10 +1126,13 @@ func TestServiceDirectorReconciler_CleanupLeaderResources(t *testing.T) {
 			recorder := metrics.NewRecorder()
 			eventRecorder := record.NewFakeRecorder(10)
 			r := &ServiceDirectorReconciler{
-				Client:   fakeClient,
-				Scheme:   scheme,
-				Recorder: eventRecorder,
-				Metrics:  recorder,
+				Client:                   fakeClient,
+				Scheme:                   scheme,
+				Recorder:                 eventRecorder,
+				Metrics:                  recorder,
+				optedInServicesCache:     make(map[string][]*cachedService),
+				cacheUpdateTimeout:       10 * time.Second,
+				metricsCollectionTimeout: 5 * time.Second,
 			}
 
 			// Test cleanupLeaderResources
@@ -1487,10 +1496,13 @@ func TestServiceDirectorReconciler_MapPodToService(t *testing.T) {
 			recorder := metrics.NewRecorder()
 			eventRecorder := record.NewFakeRecorder(10)
 			r := &ServiceDirectorReconciler{
-				Client:   fakeClient,
-				Scheme:   scheme,
-				Recorder: eventRecorder,
-				Metrics:  recorder,
+				Client:                   fakeClient,
+				Scheme:                   scheme,
+				Recorder:                 eventRecorder,
+				Metrics:                  recorder,
+				optedInServicesCache:     make(map[string][]*cachedService),
+				cacheUpdateTimeout:       10 * time.Second,
+				metricsCollectionTimeout: 5 * time.Second,
 			}
 
 			// Pre-populate cache if needed
@@ -1594,10 +1606,13 @@ func TestServiceDirectorReconciler_MapEndpointSliceToService(t *testing.T) {
 			recorder := metrics.NewRecorder()
 			eventRecorder := record.NewFakeRecorder(10)
 			r := &ServiceDirectorReconciler{
-				Client:   fakeClient,
-				Scheme:   scheme,
-				Recorder: eventRecorder,
-				Metrics:  recorder,
+				Client:                   fakeClient,
+				Scheme:                   scheme,
+				Recorder:                 eventRecorder,
+				Metrics:                  recorder,
+				optedInServicesCache:     make(map[string][]*cachedService),
+				cacheUpdateTimeout:       10 * time.Second,
+				metricsCollectionTimeout: 5 * time.Second,
 			}
 
 			// Test mapEndpointSliceToService
@@ -1758,10 +1773,13 @@ func TestServiceDirectorReconciler_UpdateOptedInServicesCache(t *testing.T) {
 			recorder := metrics.NewRecorder()
 			eventRecorder := record.NewFakeRecorder(10)
 			r := &ServiceDirectorReconciler{
-				Client:   fakeClient,
-				Scheme:   scheme,
-				Recorder: eventRecorder,
-				Metrics:  recorder,
+				Client:                   fakeClient,
+				Scheme:                   scheme,
+				Recorder:                 eventRecorder,
+				Metrics:                  recorder,
+				optedInServicesCache:     make(map[string][]*cachedService),
+				cacheUpdateTimeout:       10 * time.Second,
+				metricsCollectionTimeout: 5 * time.Second,
 			}
 
 			// Test updateOptedInServicesCache
@@ -1913,10 +1931,13 @@ func TestServiceDirectorReconciler_UpdateOptedInServicesCacheForService(t *testi
 			recorder := metrics.NewRecorder()
 			eventRecorder := record.NewFakeRecorder(10)
 			r := &ServiceDirectorReconciler{
-				Client:   fakeClient,
-				Scheme:   scheme,
-				Recorder: eventRecorder,
-				Metrics:  recorder,
+				Client:                   fakeClient,
+				Scheme:                   scheme,
+				Recorder:                 eventRecorder,
+				Metrics:                  recorder,
+				optedInServicesCache:     make(map[string][]*cachedService),
+				cacheUpdateTimeout:       10 * time.Second,
+				metricsCollectionTimeout: 5 * time.Second,
 			}
 
 			// Initialize cache
