@@ -40,6 +40,13 @@ type Recorder struct {
 	reconciliationsTotal          *prometheus.CounterVec
 	leaderStable                  *prometheus.GaugeVec
 	endpointWriteErrorsTotal      *prometheus.CounterVec
+	retryAttemptsTotal            *prometheus.CounterVec
+	retrySuccessAfterRetryTotal   *prometheus.CounterVec
+	cacheSize                     *prometheus.GaugeVec
+	cacheUpdateDurationSeconds    *prometheus.HistogramVec
+	cacheHitsTotal                *prometheus.CounterVec
+	cacheMissesTotal              *prometheus.CounterVec
+	timeoutOccurrencesTotal       *prometheus.CounterVec
 }
 
 var (
@@ -205,6 +212,70 @@ func NewRecorder() *Recorder {
 			},
 			[]string{"namespace", "service"},
 		),
+
+		// Retry attempts: total number of retry attempts for K8s API calls
+		retryAttemptsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "zen_lead_retry_attempts_total",
+				Help: "Total number of retry attempts for Kubernetes API operations",
+			},
+			[]string{"namespace", "service", "operation", "attempt"}, // attempt: 1, 2, 3, max
+		),
+
+		// Retry success after retry: operations that succeeded after retry
+		retrySuccessAfterRetryTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "zen_lead_retry_success_after_retry_total",
+				Help: "Total number of operations that succeeded after retry",
+			},
+			[]string{"namespace", "service", "operation"},
+		),
+
+		// Cache size: number of cached services per namespace
+		cacheSize: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "zen_lead_cache_size",
+				Help: "Number of cached opted-in services per namespace",
+			},
+			[]string{"namespace"},
+		),
+
+		// Cache update duration: time taken to update cache
+		cacheUpdateDurationSeconds: promauto.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "zen_lead_cache_update_duration_seconds",
+				Help:    "Duration of cache update operations in seconds",
+				Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
+			},
+			[]string{"namespace"},
+		),
+
+		// Cache hits: successful cache lookups
+		cacheHitsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "zen_lead_cache_hits_total",
+				Help: "Total number of cache hits (namespace found in cache)",
+			},
+			[]string{"namespace"},
+		),
+
+		// Cache misses: cache lookups that required refresh
+		cacheMissesTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "zen_lead_cache_misses_total",
+				Help: "Total number of cache misses (namespace not found, cache refreshed)",
+			},
+			[]string{"namespace"},
+		),
+
+		// Timeout occurrences: operations that timed out
+		timeoutOccurrencesTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "zen_lead_timeout_occurrences_total",
+				Help: "Total number of operations that timed out",
+			},
+			[]string{"namespace", "operation"}, // operation: cache_update, metrics_collection
+		),
 	}
 
 	globalRecorder = recorder
@@ -306,6 +377,42 @@ func (r *Recorder) RecordLeaderStable(namespace, service string, stable bool) {
 // RecordEndpointWriteError increments the endpoint write error counter.
 func (r *Recorder) RecordEndpointWriteError(namespace, service string) {
 	r.endpointWriteErrorsTotal.WithLabelValues(namespace, service).Inc()
+}
+
+// RecordRetryAttempt records a retry attempt for a K8s API operation.
+// attempt: "1", "2", "3", or "max" for final attempt
+func (r *Recorder) RecordRetryAttempt(namespace, service, operation, attempt string) {
+	r.retryAttemptsTotal.WithLabelValues(namespace, service, operation, attempt).Inc()
+}
+
+// RecordRetrySuccessAfterRetry records when an operation succeeded after retry.
+func (r *Recorder) RecordRetrySuccessAfterRetry(namespace, service, operation string) {
+	r.retrySuccessAfterRetryTotal.WithLabelValues(namespace, service, operation).Inc()
+}
+
+// RecordCacheSize records the number of cached services in a namespace.
+func (r *Recorder) RecordCacheSize(namespace string, size int) {
+	r.cacheSize.WithLabelValues(namespace).Set(float64(size))
+}
+
+// RecordCacheUpdateDuration records the duration of a cache update operation.
+func (r *Recorder) RecordCacheUpdateDuration(namespace string, durationSeconds float64) {
+	r.cacheUpdateDurationSeconds.WithLabelValues(namespace).Observe(durationSeconds)
+}
+
+// RecordCacheHit records a cache hit (namespace found in cache).
+func (r *Recorder) RecordCacheHit(namespace string) {
+	r.cacheHitsTotal.WithLabelValues(namespace).Inc()
+}
+
+// RecordCacheMiss records a cache miss (namespace not found, cache refreshed).
+func (r *Recorder) RecordCacheMiss(namespace string) {
+	r.cacheMissesTotal.WithLabelValues(namespace).Inc()
+}
+
+// RecordTimeout records an operation timeout.
+func (r *Recorder) RecordTimeout(namespace, operation string) {
+	r.timeoutOccurrencesTotal.WithLabelValues(namespace, operation).Inc()
 }
 
 // Exported getters for testing (access to metric vectors)
