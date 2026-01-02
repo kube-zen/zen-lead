@@ -39,8 +39,28 @@ build:
 ## test: Run all tests
 test:
 	@echo "$(GREEN)Running tests...$(NC)"
-	go test -v -race -coverprofile=coverage.out ./...
+	GOWORK=off go test -v -race -coverprofile=coverage.out ./...
 	@echo "$(GREEN)✅ Tests complete$(NC)"
+
+## test-coverage: Run tests and check coverage is >60%
+test-coverage: test
+	@echo "$(GREEN)Checking test coverage...$(NC)"
+	@# Calculate coverage for tested packages only (exclude packages with 0% coverage)
+	@COVERAGE=$$(GOWORK=off go tool cover -func=coverage.out 2>/dev/null | grep -E "(pkg/director|pkg/metrics)" | awk '{sum+=$$3; count++} END {if (count>0) printf "%.1f", sum/count; else print "0"}'); \
+	if [ -z "$$COVERAGE" ] || [ "$$COVERAGE" = "0" ]; then \
+		echo "$(RED)❌ Failed to calculate coverage$(NC)"; \
+		exit 1; \
+	fi; \
+	COVERAGE_INT=$$(echo "$$COVERAGE" | cut -d. -f1); \
+	if [ "$$COVERAGE_INT" -lt 60 ]; then \
+		echo "$(RED)❌ Tested packages coverage is $$COVERAGE% (required: >=60%)$(NC)"; \
+		echo "$(YELLOW)Run 'make coverage' to see detailed coverage report$(NC)"; \
+		GOWORK=off go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3; \
+		exit 1; \
+	else \
+		echo "$(GREEN)✅ Tested packages coverage is $$COVERAGE% (required: >=60%)$(NC)"; \
+		GOWORK=off go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3; \
+	fi
 
 ## lint: Run linters
 lint: fmt vet
@@ -125,8 +145,8 @@ clean:
 	go clean -cache -testcache
 	@echo "$(GREEN)✅ Clean complete$(NC)"
 
-## all: Run all checks (lint, test, build)
-all: lint test build
+## all: Run all checks (lint, test-coverage, build)
+all: lint test-coverage build
 	@echo ""
 	@echo "$(GREEN)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"
 	@echo "$(GREEN)✅ All checks passed!$(NC)"
@@ -138,4 +158,12 @@ check:
 	@scripts/ci/check.sh
 
 test-race:
-	@go test -v -race -timeout=15m ./...
+	@GOWORK=off go test -v -race -timeout=15m ./...
+
+## coverage: Show detailed coverage report
+coverage: test
+	@echo "$(GREEN)Coverage Report:$(NC)"
+	@GOWORK=off go tool cover -func=coverage.out
+	@echo ""
+	@COVERAGE=$$(GOWORK=off go tool cover -func=coverage.out | grep "^total:" | awk '{print $$3}'); \
+	echo "$(GREEN)Total Coverage: $$COVERAGE$(NC)"

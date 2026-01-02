@@ -46,11 +46,27 @@ jobs:
       - name: Install dependencies
         run: go mod download
       
-      - name: Run tests
-        run: go test -v -race -timeout=15m ./...
+      - name: Run tests with coverage
+        env:
+          GOWORK: off
+        run: go test -v -race -timeout=15m -coverprofile=coverage.out ./...
       
-      - name: Check coverage
-        run: go test -coverprofile=coverage.out ./...
+      - name: Check coverage (>=60%)
+        env:
+          GOWORK: off
+        run: |
+          # Calculate coverage for tested packages only
+          COVERAGE=$(go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics)" | awk '{sum+=$3; count++} END {if (count>0) printf "%.1f", sum/count; else print "0"}')
+          COVERAGE_INT=$(echo "$COVERAGE" | cut -d. -f1)
+          echo "Tested packages coverage: ${COVERAGE}%"
+          if [ -z "$COVERAGE_INT" ] || [ "$COVERAGE_INT" -lt 60 ]; then
+            echo "❌ Coverage is ${COVERAGE}% (required: >=60%)"
+            go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3
+            exit 1
+          else
+            echo "✅ Coverage is ${COVERAGE}% (>=60%)"
+            go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3
+          fi
 
   build:
     name: Build
