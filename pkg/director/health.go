@@ -54,4 +54,3 @@ func (c *ControllerHealthChecker) Check(req *http.Request) error {
 	// Controller is healthy if reconciler is properly initialized
 	return nil
 }
-
