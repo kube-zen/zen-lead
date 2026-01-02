@@ -48,6 +48,7 @@ type Recorder struct {
 	cacheMissesTotal              *prometheus.CounterVec
 	timeoutOccurrencesTotal       *prometheus.CounterVec
 	failoverLatencySeconds        *prometheus.HistogramVec
+	apiCallDurationSeconds        *prometheus.HistogramVec
 }
 
 var (
@@ -287,6 +288,16 @@ func NewRecorder() *Recorder {
 			},
 			[]string{"namespace", "service", "reason"}, // reason: notReady, terminating, noIP, noneReady
 		),
+
+		// API call latency: duration of Kubernetes API operations
+		apiCallDurationSeconds: promauto.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "zen_lead_api_call_duration_seconds",
+				Help:    "Duration of Kubernetes API operations in seconds",
+				Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
+			},
+			[]string{"namespace", "service", "operation", "result"}, // operation: get, list, create, patch, delete, result: success, error
+		),
 	}
 
 	globalRecorder = recorder
@@ -429,6 +440,11 @@ func (r *Recorder) RecordTimeout(namespace, operation string) {
 // RecordFailoverLatency records the time from leader unhealthy detection to new leader selected
 func (r *Recorder) RecordFailoverLatency(namespace, service, reason string, latencySeconds float64) {
 	r.failoverLatencySeconds.WithLabelValues(namespace, service, reason).Observe(latencySeconds)
+}
+
+// RecordAPICallDuration records the duration of a Kubernetes API operation
+func (r *Recorder) RecordAPICallDuration(namespace, service, operation, result string, durationSeconds float64) {
+	r.apiCallDurationSeconds.WithLabelValues(namespace, service, operation, result).Observe(durationSeconds)
 }
 
 // Exported getters for testing (access to metric vectors)

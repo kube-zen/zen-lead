@@ -182,3 +182,39 @@ spec:
             summary: "Port resolution failure occurred"
             description: "Service {{ $labels.service }} in namespace {{ $labels.namespace }} had a port resolution failure for port {{ $labels.port_name }}."
 
+        # Alert on cache size approaching limit
+        - alert: ZenLeadCacheSizeApproachingLimit
+          expr: zen_lead_cache_size / 1000 > 0.8
+          for: 5m
+          labels:
+            severity: warning
+            component: performance
+          annotations:
+            summary: "Cache size approaching limit"
+            description: "Cache size in namespace {{ $labels.namespace }} is {{ $value | humanizePercentage }} of the limit (1000). Consider increasing maxCacheSizePerNamespace or investigate cache growth."
+
+        # Alert on high API call latency (P95 > 1s)
+        - alert: ZenLeadHighAPICallLatency
+          expr: |
+            histogram_quantile(0.95,
+              rate(zen_lead_api_call_duration_seconds_bucket{result="success"}[5m])) > 1
+          for: 10m
+          labels:
+            severity: warning
+            component: performance
+          annotations:
+            summary: "High API call latency detected"
+            description: "95th percentile API call latency is {{ $value }}s for operation {{ $labels.operation }} in namespace {{ $labels.namespace }}. This may indicate API server overload or network issues."
+
+        # Alert on controller restart frequency (high restart rate)
+        - alert: ZenLeadHighControllerRestartRate
+          expr: |
+            rate(process_start_time_seconds[5m]) > 0.01
+          for: 5m
+          labels:
+            severity: warning
+            component: reliability
+          annotations:
+            summary: "High controller restart rate"
+            description: "Controller is restarting frequently ({{ $value }} restarts/sec). Check controller logs and resource limits."
+

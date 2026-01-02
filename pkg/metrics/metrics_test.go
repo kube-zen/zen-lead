@@ -249,6 +249,29 @@ func TestRecordFailoverLatency(t *testing.T) {
 	}
 }
 
+func TestRecordAPICallDuration(t *testing.T) {
+	recorder := NewRecorder()
+	recorder.RecordAPICallDuration("default", "my-service", "get", "success", 0.05)
+
+	// Verify metric was observed
+	apiCallDurationMetric := recorder.APICallDurationSeconds()
+	if apiCallDurationMetric == nil {
+		t.Fatal("APICallDurationSeconds() returned nil")
+	}
+
+	// Get metric value
+	metric, err := apiCallDurationMetric.GetMetricWithLabelValues("default", "my-service", "get", "success")
+	if err != nil {
+		t.Fatalf("Failed to get metric: %v", err)
+	}
+
+	// Verify histogram value
+	histogram := metric.(prometheus.Histogram)
+	if histogram == nil {
+		t.Fatal("Metric is not a Histogram")
+	}
+}
+
 func TestMetricsEdgeCases(t *testing.T) {
 	recorder := NewRecorder()
 

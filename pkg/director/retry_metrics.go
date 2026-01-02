@@ -19,19 +19,22 @@ package director
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/kube-zen/zen-lead/pkg/metrics"
 	"github.com/kube-zen/zen-sdk/pkg/retry"
 )
 
-// retryDoWithMetrics wraps retry.Do to record retry attempt metrics.
-// It tracks the number of attempts and records metrics for observability.
+// retryDoWithMetrics wraps retry.Do to record retry attempt metrics and API call latency.
+// It tracks the number of attempts, latency, and records metrics for observability.
 func retryDoWithMetrics(ctx context.Context, cfg retry.Config, fn func() error, recorder *metrics.Recorder, namespace, service, operation string) error {
 	if recorder == nil {
 		// Fallback to regular retry if metrics recorder is not available
 		return retry.Do(ctx, cfg, fn)
 	}
 
+	// Track overall operation latency (including retries)
+	startTime := time.Now()
 	var attemptCount int
 	succeededAfterRetry := false
 
@@ -68,6 +71,14 @@ func retryDoWithMetrics(ctx context.Context, cfg retry.Config, fn func() error, 
 
 	// Use zen-sdk retry with wrapped function
 	err := retry.Do(ctx, cfg, wrappedFn)
+
+	// Record overall API call latency (including all retry attempts)
+	duration := time.Since(startTime).Seconds()
+	result := "success"
+	if err != nil {
+		result = "error"
+	}
+	recorder.RecordAPICallDuration(namespace, service, operation, result, duration)
 
 	// Record success after retry if applicable
 	// Note: succeededAfterRetry was set inside the closure but is accessible here
