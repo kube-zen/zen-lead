@@ -201,7 +201,7 @@ leaderPod := &readyPods[0]
 
 ### 8. Cache Miss Race Condition Potential
 
-**Location**: `pkg/director/service_director.go:1273-1283`
+**Location**: `pkg/director/service_director.go:1292-1318`
 
 **Issue**: When cache miss occurs, the code unlocks, calls `updateOptedInServicesCache` (which locks), then re-locks. Between the unlock and re-lock, another goroutine could modify the cache.
 
@@ -216,7 +216,11 @@ r.cacheMu.RUnlock()
 
 **Impact**: **LOW** - The cache update itself is atomic, but the read after could be stale. This is acceptable for a cache miss scenario.
 
-**Fix**: This is actually acceptable behavior - cache misses are expected to be slower.
+**Fix**: ✅ FIXED - Implemented double-checked locking pattern:
+- Upgrade to write lock when cache miss detected
+- Double-check cache after acquiring write lock (another goroutine might have updated it)
+- Update cache with lock held using `updateOptedInServicesCacheLocked` helper
+- Eliminates race condition window between unlock and re-lock
 
 ---
 

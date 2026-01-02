@@ -1290,21 +1290,28 @@ func (r *ServiceDirectorReconciler) mapPodToService(ctx context.Context, obj cli
 	}
 
 	// Use cache to only check opted-in Services in this namespace (thread-safe)
+	// Fast path: check cache with read lock
 	r.cacheMu.RLock()
 	cachedServices := r.optedInServicesCache[pod.Namespace]
 	r.cacheMu.RUnlock()
 
 	if len(cachedServices) == 0 {
-		// Cache miss - refresh cache for this namespace
-		// Use package-level logger to avoid allocation
-		logger := packageLogger.WithContext(ctx)
-		if r.Metrics != nil {
-			r.Metrics.RecordCacheMiss(pod.Namespace)
-		}
-		r.updateOptedInServicesCache(ctx, pod.Namespace, logger)
-		r.cacheMu.RLock()
+		// Cache miss - use double-checked locking to prevent race condition
+		// Upgrade to write lock to update cache atomically
+		r.cacheMu.Lock()
+		// Double-check: another goroutine might have updated the cache
 		cachedServices = r.optedInServicesCache[pod.Namespace]
-		r.cacheMu.RUnlock()
+		if len(cachedServices) == 0 {
+			// Still empty - update cache (with lock held to prevent race)
+			logger := packageLogger.WithContext(ctx)
+			if r.Metrics != nil {
+				r.Metrics.RecordCacheMiss(pod.Namespace)
+			}
+			// Update cache with lock held (updateOptedInServicesCache will try to lock again, so we need a helper)
+			r.updateOptedInServicesCacheLocked(ctx, pod.Namespace, logger)
+			cachedServices = r.optedInServicesCache[pod.Namespace]
+		}
+		r.cacheMu.Unlock()
 	} else {
 		// Cache hit - update access time for LRU (upgrade to write lock)
 		now := time.Now()
