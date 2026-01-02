@@ -424,6 +424,9 @@ test_multiple_failovers() {
     local num_failovers=$NUM_FAILOVERS
     local total_downtime=0
     local success_count=0
+    local min_downtime=""
+    local max_downtime=""
+    local downtime_file=$(mktemp)
     
     for i in $(seq 1 $num_failovers); do
         # Show progress every 10 failovers or for first/last 5
@@ -453,16 +456,25 @@ test_multiple_failovers() {
             if [ -n "$new_leader" ] && [ "$new_leader" != "$leader" ]; then
                 local end_time=$(date +%s.%N)
                 local downtime=$(echo "$end_time - $start_time" | bc)
+                
+                # Store downtime for min/max calculation
+                echo "$downtime" >> "$downtime_file"
+                
                 total_downtime=$(echo "$total_downtime + $downtime" | bc)
                 success_count=$((success_count + 1))
+                
+                # Update min/max
+                if [ -z "$min_downtime" ] || [ "$(echo "$downtime < $min_downtime" | bc)" -eq 1 ]; then
+                    min_downtime="$downtime"
+                fi
+                if [ -z "$max_downtime" ] || [ "$(echo "$downtime > $max_downtime" | bc)" -eq 1 ]; then
+                    max_downtime="$downtime"
+                fi
                 
                 # Only log details for first/last 5 or every 10th
                 if [ $i -le 5 ] || [ $i -ge $((num_failovers - 4)) ] || [ $((i % 10)) -eq 0 ]; then
                     log_success "Failover $i completed in ${downtime}s"
                     append_report "**Failover $i:** ${downtime}s (from $leader to $new_leader)"
-                else
-                    # Store for summary statistics
-                    append_report "**Failover $i:** ${downtime}s" > /dev/null 2>&1 || true
                 fi
                 
                 # Wait a bit before next failover (reduced for faster testing)
@@ -477,19 +489,22 @@ test_multiple_failovers() {
         fi
     done
     
+    # Clean up temp file
+    rm -f "$downtime_file"
+    
     if [ $success_count -gt 0 ]; then
         local avg_downtime=$(echo "scale=3; $total_downtime / $success_count" | bc)
-        local min_downtime=$(echo "scale=3; $total_downtime / $success_count" | bc)  # Will be calculated from individual times
-        local max_downtime=$(echo "scale=3; $total_downtime / $success_count" | bc)  # Will be calculated from individual times
-        
-        # Calculate min/max from report (simplified - we'll use avg for now)
         log_success "Average failover time: ${avg_downtime}s (${success_count}/${num_failovers} successful)"
+        log_success "Min: ${min_downtime}s, Max: ${max_downtime}s"
+        
         append_report ""
         append_report "**Statistics:**"
         append_report "- **Total Failovers:** $num_failovers"
         append_report "- **Successful:** ${success_count}"
         append_report "- **Failed:** $((num_failovers - success_count))"
         append_report "- **Success Rate:** $(echo "scale=1; $success_count * 100 / $num_failovers" | bc)%"
+        append_report "- **Min Failover Time:** ${min_downtime}s"
+        append_report "- **Max Failover Time:** ${max_downtime}s"
         append_report "- **Average Failover Time:** ${avg_downtime}s"
         append_report "- **Total Test Duration:** ~$(echo "scale=0; ($num_failovers * 2) / 60" | bc) minutes"
     else
