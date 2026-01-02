@@ -1305,7 +1305,7 @@ func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		// Bound reconcile concurrency + Safety resync handled by informer cache (default 10m)
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 10, // Bound reconcile concurrency to prevent starvation
+			MaxConcurrentReconciles: r.maxConcurrentReconciles, // Configurable concurrency limit
 		}).
 		Complete(r)
 }
