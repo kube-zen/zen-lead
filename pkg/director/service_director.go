@@ -281,12 +281,12 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if currentLeaderPod.DeletionTimestamp != nil ||
 			!isPodReady(currentLeaderPod) ||
 			currentLeaderPod.Status.PodIP == "" {
-		logger.Info("Current leader unhealthy, triggering immediate failover",
-			sdklog.Operation("failover"),
-			sdklog.String("leader", currentLeaderPod.Name),
-			sdklog.Bool("terminating", currentLeaderPod.DeletionTimestamp != nil),
-			sdklog.Bool("ready", isPodReady(currentLeaderPod)),
-			sdklog.Bool("hasIP", currentLeaderPod.Status.PodIP != ""))
+			logger.Info("Current leader unhealthy, triggering immediate failover",
+				sdklog.Operation("failover"),
+				sdklog.String("leader", currentLeaderPod.Name),
+				sdklog.Bool("terminating", currentLeaderPod.DeletionTimestamp != nil),
+				sdklog.Bool("ready", isPodReady(currentLeaderPod)),
+				sdklog.Bool("hasIP", currentLeaderPod.Status.PodIP != ""))
 			// Force new leader selection (bypass stickiness)
 			bypassStickiness = true
 			currentLeaderPod = nil
