@@ -434,6 +434,764 @@ func TestServiceDirectorReconciler_Reconcile_PortResolutionFailure(t *testing.T)
 	// The test verifies that RecordPortResolutionFailure was called during reconciliation
 }
 
+func TestIsPodReady(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		expected bool
+	}{
+		{
+			name: "pod is ready",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					Conditions: []corev1.PodCondition{
+						{
+							Type:   corev1.PodReady,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "pod not ready - condition false",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					Conditions: []corev1.PodCondition{
+						{
+							Type:   corev1.PodReady,
+							Status: corev1.ConditionFalse,
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "pod not ready - wrong phase",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+					Conditions: []corev1.PodCondition{
+						{
+							Type:   corev1.PodReady,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "pod not ready - no ready condition",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase:      corev1.PodRunning,
+					Conditions: []corev1.PodCondition{},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "pod not ready - other condition",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					Conditions: []corev1.PodCondition{
+						{
+							Type:   corev1.PodScheduled,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isPodReady(tt.pod)
+			if result != tt.expected {
+				t.Errorf("isPodReady() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_GetPodReadySince(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		expected *time.Time
+	}{
+		{
+			name: "pod ready with last transition time",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:               corev1.PodReady,
+							Status:             corev1.ConditionTrue,
+							LastTransitionTime: metav1.NewTime(now.Add(-5 * time.Minute)),
+						},
+					},
+				},
+			},
+			expected: func() *time.Time {
+				t := now.Add(-5 * time.Minute)
+				return &t
+			}(),
+		},
+		{
+			name: "pod not ready",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{
+							Type:   corev1.PodReady,
+							Status: corev1.ConditionFalse,
+						},
+					},
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "pod no ready condition",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{},
+				},
+			},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &ServiceDirectorReconciler{}
+			result := r.getPodReadySince(tt.pod)
+			if (result == nil) != (tt.expected == nil) {
+				t.Errorf("getPodReadySince() = %v, expected %v", result, tt.expected)
+			}
+			if result != nil && tt.expected != nil {
+				if !result.Equal(*tt.expected) {
+					t.Errorf("getPodReadySince() = %v, expected %v", result, tt.expected)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_GetMinReadyDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		service  *corev1.Service
+		expected time.Duration
+	}{
+		{
+			name: "no annotation",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: nil,
+				},
+			},
+			expected: 0,
+		},
+		{
+			name: "empty annotation",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			expected: 0,
+		},
+		{
+			name: "valid duration",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						AnnotationMinReadyDurationService: "30s",
+					},
+				},
+			},
+			expected: 30 * time.Second,
+		},
+		{
+			name: "zero duration",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						AnnotationMinReadyDurationService: "0s",
+					},
+				},
+			},
+			expected: 0,
+		},
+		{
+			name: "invalid duration",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						AnnotationMinReadyDurationService: "invalid",
+					},
+				},
+			},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &ServiceDirectorReconciler{}
+			result := r.getMinReadyDuration(tt.service)
+			if result != tt.expected {
+				t.Errorf("getMinReadyDuration() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_GetLeaderServiceName(t *testing.T) {
+	tests := []struct {
+		name     string
+		service  *corev1.Service
+		expected string
+	}{
+		{
+			name: "default name",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "my-service",
+				},
+			},
+			expected: "my-service-leader",
+		},
+		{
+			name: "custom name via annotation",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "my-service",
+					Annotations: map[string]string{
+						AnnotationLeaderServiceNameService: "custom-leader",
+					},
+				},
+			},
+			expected: "custom-leader",
+		},
+		{
+			name: "empty custom name falls back to default",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "my-service",
+					Annotations: map[string]string{
+						AnnotationLeaderServiceNameService: "",
+					},
+				},
+			},
+			expected: "my-service-leader",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &ServiceDirectorReconciler{}
+			result := r.getLeaderServiceName(tt.service)
+			if result != tt.expected {
+				t.Errorf("getLeaderServiceName() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_GetCurrentLeaderPod(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name           string
+		service        *corev1.Service
+		endpointSlice  *discoveryv1.EndpointSlice
+		pod            *corev1.Pod
+		expectedLeader bool
+		expectError    bool
+	}{
+		{
+			name: "find current leader pod by UID",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service",
+					Namespace: "default",
+				},
+			},
+			endpointSlice: &discoveryv1.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service-leader",
+					Namespace: "default",
+				},
+				Endpoints: []discoveryv1.Endpoint{
+					{
+						TargetRef: &corev1.ObjectReference{
+							Kind:      "Pod",
+							Namespace: "default",
+							Name:      "pod-1",
+							UID:       "pod-uid-1",
+						},
+					},
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
+					UID:       "pod-uid-1",
+				},
+			},
+			expectedLeader: true,
+			expectError:    false,
+		},
+		{
+			name: "no endpoint slice",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service",
+					Namespace: "default",
+				},
+			},
+			endpointSlice:  nil,
+			pod:            nil,
+			expectedLeader: false,
+			expectError:    false,
+		},
+		{
+			name: "pod UID mismatch (pod recreated)",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service",
+					Namespace: "default",
+				},
+			},
+			endpointSlice: &discoveryv1.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service-leader",
+					Namespace: "default",
+				},
+				Endpoints: []discoveryv1.Endpoint{
+					{
+						TargetRef: &corev1.ObjectReference{
+							Kind:      "Pod",
+							Namespace: "default",
+							Name:      "pod-1",
+							UID:       "pod-uid-1",
+						},
+					},
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
+					UID:       "pod-uid-2", // Different UID
+				},
+			},
+			expectedLeader: false,
+			expectError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fake client
+			objs := []client.Object{tt.service}
+			if tt.endpointSlice != nil {
+				objs = append(objs, tt.endpointSlice)
+			}
+			if tt.pod != nil {
+				objs = append(objs, tt.pod)
+			}
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objs...).
+				Build()
+
+			// Create reconciler
+			recorder := metrics.NewRecorder()
+			eventRecorder := record.NewFakeRecorder(10)
+			r := &ServiceDirectorReconciler{
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: eventRecorder,
+				Metrics:  recorder,
+			}
+
+			// Test getCurrentLeaderPod
+			logger := packageLogger.WithContext(context.Background())
+			leaderPod := r.getCurrentLeaderPod(context.Background(), tt.service, logger)
+
+			if (leaderPod != nil) != tt.expectedLeader {
+				t.Errorf("getCurrentLeaderPod() returned pod = %v, expected leader %v", leaderPod != nil, tt.expectedLeader)
+			}
+			if tt.expectedLeader && leaderPod != nil && tt.pod != nil {
+				if leaderPod.Name != tt.pod.Name {
+					t.Errorf("getCurrentLeaderPod() returned pod name = %v, expected %v", leaderPod.Name, tt.pod.Name)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_SelectLeaderPod(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name             string
+		service          *corev1.Service
+		pods             []corev1.Pod
+		bypassStickiness bool
+		expectedPodName  string
+		expectNil        bool
+	}{
+		{
+			name: "select oldest ready pod",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service",
+					Namespace: "default",
+					Annotations: map[string]string{
+						AnnotationEnabledService: "true",
+					},
+				},
+				Spec: corev1.ServiceSpec{
+					Selector: map[string]string{
+						"app": "my-app",
+					},
+				},
+			},
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "pod-2",
+						Namespace:         "default",
+						Labels:            map[string]string{"app": "my-app"},
+						CreationTimestamp: metav1.NewTime(time.Now().Add(-3 * time.Minute)),
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+						Conditions: []corev1.PodCondition{
+							{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+						},
+						PodIP: "10.0.0.2",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "pod-1",
+						Namespace:         "default",
+						Labels:            map[string]string{"app": "my-app"},
+						CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+						Conditions: []corev1.PodCondition{
+							{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+						},
+						PodIP: "10.0.0.1",
+					},
+				},
+			},
+			bypassStickiness: true,
+			expectedPodName:  "pod-1", // Oldest
+			expectNil:        false,
+		},
+		{
+			name: "no ready pods",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service",
+					Namespace: "default",
+					Annotations: map[string]string{
+						AnnotationEnabledService: "true",
+					},
+				},
+				Spec: corev1.ServiceSpec{
+					Selector: map[string]string{
+						"app": "my-app",
+					},
+				},
+			},
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "pod-1",
+						Namespace: "default",
+						Labels:    map[string]string{"app": "my-app"},
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodPending,
+						Conditions: []corev1.PodCondition{
+							{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+						},
+					},
+				},
+			},
+			bypassStickiness: true,
+			expectedPodName:  "",
+			expectNil:        true,
+		},
+		{
+			name: "sticky disabled",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service",
+					Namespace: "default",
+					Annotations: map[string]string{
+						AnnotationEnabledService: "true",
+						AnnotationStickyService:  "false",
+					},
+				},
+				Spec: corev1.ServiceSpec{
+					Selector: map[string]string{
+						"app": "my-app",
+					},
+				},
+			},
+			pods: []corev1.Pod{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              "pod-1",
+						Namespace:         "default",
+						Labels:            map[string]string{"app": "my-app"},
+						CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
+					},
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+						Conditions: []corev1.PodCondition{
+							{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+						},
+						PodIP: "10.0.0.1",
+					},
+				},
+			},
+			bypassStickiness: false,
+			expectedPodName:  "pod-1",
+			expectNil:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fake client
+			objs := []client.Object{tt.service}
+			for i := range tt.pods {
+				objs = append(objs, &tt.pods[i])
+			}
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objs...).
+				Build()
+
+			// Create reconciler
+			recorder := metrics.NewRecorder()
+			eventRecorder := record.NewFakeRecorder(10)
+			r := &ServiceDirectorReconciler{
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: eventRecorder,
+				Metrics:  recorder,
+			}
+
+			// Test selectLeaderPod
+			logger := packageLogger.WithContext(context.Background())
+			leaderPod := r.selectLeaderPod(context.Background(), tt.service, tt.pods, tt.bypassStickiness, logger)
+
+			if (leaderPod == nil) != tt.expectNil {
+				t.Errorf("selectLeaderPod() returned nil = %v, expected %v", leaderPod == nil, tt.expectNil)
+			}
+			if !tt.expectNil && leaderPod != nil {
+				if leaderPod.Name != tt.expectedPodName {
+					t.Errorf("selectLeaderPod() returned pod name = %v, expected %v", leaderPod.Name, tt.expectedPodName)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_CleanupLeaderResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name          string
+		service       *corev1.Service
+		leaderService *corev1.Service
+		svcName       types.NamespacedName
+		expectDeleted bool
+		expectError   bool
+	}{
+		{
+			name: "cleanup when service exists",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service",
+					Namespace: "default",
+				},
+			},
+			leaderService: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service-leader",
+					Namespace: "default",
+					Labels: map[string]string{
+						LabelManagedBy:     LabelManagedByValue,
+						LabelSourceService: "my-service",
+					},
+				},
+			},
+			svcName: types.NamespacedName{
+				Name:      "my-service",
+				Namespace: "default",
+			},
+			expectDeleted: true,
+			expectError:   false,
+		},
+		{
+			name:    "cleanup when service doesn't exist - find by label",
+			service: nil,
+			leaderService: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service-leader",
+					Namespace: "default",
+					Labels: map[string]string{
+						LabelManagedBy:     LabelManagedByValue,
+						LabelSourceService: "my-service",
+					},
+				},
+			},
+			svcName: types.NamespacedName{
+				Name:      "my-service",
+				Namespace: "default",
+			},
+			expectDeleted: true,
+			expectError:   false,
+		},
+		{
+			name: "no leader service to cleanup",
+			service: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service",
+					Namespace: "default",
+				},
+			},
+			leaderService: nil,
+			svcName: types.NamespacedName{
+				Name:      "my-service",
+				Namespace: "default",
+			},
+			expectDeleted: false,
+			expectError:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fake client
+			objs := []client.Object{}
+			if tt.service != nil {
+				objs = append(objs, tt.service)
+			}
+			if tt.leaderService != nil {
+				objs = append(objs, tt.leaderService)
+			}
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objs...).
+				Build()
+
+			// Create reconciler
+			recorder := metrics.NewRecorder()
+			eventRecorder := record.NewFakeRecorder(10)
+			r := &ServiceDirectorReconciler{
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: eventRecorder,
+				Metrics:  recorder,
+			}
+
+			// Test cleanupLeaderResources
+			logger := packageLogger.WithContext(context.Background())
+			result, err := r.cleanupLeaderResources(context.Background(), tt.svcName, logger)
+
+			if (err != nil) != tt.expectError {
+				t.Errorf("cleanupLeaderResources() error = %v, expectError %v", err, tt.expectError)
+			}
+			if err != nil {
+				return
+			}
+
+			// Verify leader service was deleted
+			if tt.expectDeleted {
+				leaderServiceName := "my-service-leader"
+				if tt.service != nil {
+					leaderServiceName = tt.service.Name + ServiceSuffixService
+				}
+				leaderSvc := &corev1.Service{}
+				err := fakeClient.Get(context.Background(), types.NamespacedName{
+					Name:      leaderServiceName,
+					Namespace: tt.svcName.Namespace,
+				}, leaderSvc)
+				if err == nil {
+					t.Error("cleanupLeaderResources() leader service was not deleted")
+				}
+			}
+
+			// Verify result
+			if result.Requeue {
+				t.Error("cleanupLeaderResources() should not requeue")
+			}
+		})
+	}
+}
+
+func TestNewServiceDirectorReconciler(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+	eventRecorder := record.NewFakeRecorder(10)
+
+	r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder)
+
+	if r == nil {
+		t.Fatal("NewServiceDirectorReconciler() returned nil")
+	}
+	if r.Client != fakeClient {
+		t.Error("NewServiceDirectorReconciler() Client not set correctly")
+	}
+	if r.Scheme != scheme {
+		t.Error("NewServiceDirectorReconciler() Scheme not set correctly")
+	}
+	if r.Recorder != eventRecorder {
+		t.Error("NewServiceDirectorReconciler() Recorder not set correctly")
+	}
+	if r.Metrics == nil {
+		t.Error("NewServiceDirectorReconciler() Metrics not initialized")
+	}
+	if r.optedInServicesCache == nil {
+		t.Error("NewServiceDirectorReconciler() optedInServicesCache not initialized")
+	}
+}
+
 func TestFilterGitOpsLabels(t *testing.T) {
 	tests := []struct {
 		name     string
