@@ -11,12 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Configuration:**
 - `--max-cache-size-per-namespace` flag to configure in-memory cache size limit per namespace (default: 1000)
-- Helm chart support for `controller.maxCacheSizePerNamespace` with comprehensive documentation
+- `--max-concurrent-reconciles` flag to configure maximum concurrent reconciliations (default: 10)
+- Helm chart support for `controller.maxCacheSizePerNamespace` and `controller.maxConcurrentReconciles` with comprehensive documentation
 
 **Observability:**
 - `zen_lead_failover_latency_seconds` histogram metric tracking time from leader unhealthy detection to new leader selected
+- `zen_lead_api_call_duration_seconds` histogram metric tracking latency for all Kubernetes API operations (Get, List, Create, Patch, Delete)
 - Custom health check endpoint (`ControllerHealthChecker`) that verifies controller initialization
 - Enhanced readiness probe that checks controller can reconcile Services
+- Enhanced Prometheus alerting rules (cache size approaching limit, high API call latency, controller restart frequency)
 
 **Documentation:**
 - Comprehensive improvement suggestions document (`docs/IMPROVEMENT_SUGGESTIONS.md`)
