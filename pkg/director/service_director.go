@@ -174,6 +174,12 @@ type ServiceDirectorReconciler struct {
 
 	// maxConcurrentReconciles limits the number of concurrent reconciliations (0 = unlimited)
 	maxConcurrentReconciles int
+
+	// cacheUpdateTimeout is the timeout for cache update operations
+	cacheUpdateTimeout time.Duration
+
+	// metricsCollectionTimeout is the timeout for metrics collection operations
+	metricsCollectionTimeout time.Duration
 }
 
 // cachedService holds a Service's selector for efficient matching
@@ -184,12 +190,18 @@ type cachedService struct {
 }
 
 // NewServiceDirectorReconciler creates a new ServiceDirectorReconciler
-func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, maxCacheSizePerNamespace, maxConcurrentReconciles int) *ServiceDirectorReconciler {
+func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, maxCacheSizePerNamespace, maxConcurrentReconciles int, cacheUpdateTimeout, metricsCollectionTimeout time.Duration) *ServiceDirectorReconciler {
 	if maxCacheSizePerNamespace <= 0 {
 		maxCacheSizePerNamespace = 1000 // Default: 1000 services per namespace
 	}
 	if maxConcurrentReconciles <= 0 {
 		maxConcurrentReconciles = 10 // Default: 10 concurrent reconciles
+	}
+	if cacheUpdateTimeout <= 0 {
+		cacheUpdateTimeout = 10 * time.Second // Default: 10 seconds
+	}
+	if metricsCollectionTimeout <= 0 {
+		metricsCollectionTimeout = 5 * time.Second // Default: 5 seconds
 	}
 	return &ServiceDirectorReconciler{
 		Client:                   client,
@@ -199,6 +211,8 @@ func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, 
 		optedInServicesCache:     make(map[string][]*cachedService),
 		maxCacheSizePerNamespace: maxCacheSizePerNamespace,
 		maxConcurrentReconciles:  maxConcurrentReconciles,
+		cacheUpdateTimeout:       cacheUpdateTimeout,
+		metricsCollectionTimeout: metricsCollectionTimeout,
 	}
 }
 
@@ -1086,8 +1100,8 @@ func (r *ServiceDirectorReconciler) updateResourceTotals(ctx context.Context, na
 		return
 	}
 
-	// Add timeout for metrics collection (5 seconds should be sufficient)
-	metricsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Add timeout for metrics collection
+	metricsCtx, cancel := context.WithTimeout(ctx, r.metricsCollectionTimeout)
 	defer cancel()
 
 	// Count leader Services (selector-less Services with zen-lead managed-by label)
@@ -1437,8 +1451,8 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCacheLocked(ctx context
 	defer span.End()
 
 	startTime := time.Now()
-	// Add timeout for cache update (10 seconds should be sufficient)
-	cacheCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// Add timeout for cache update
+	cacheCtx, cancel := context.WithTimeout(ctx, r.cacheUpdateTimeout)
 	defer cancel()
 
 	serviceList := &corev1.ServiceList{}

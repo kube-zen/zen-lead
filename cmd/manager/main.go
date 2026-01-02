@@ -68,6 +68,22 @@ func main() {
 	flag.IntVar(&maxConcurrentReconciles, "max-concurrent-reconciles", 10,
 		"Maximum number of concurrent reconciles. Default: 10.")
 
+	var cacheUpdateTimeoutSeconds int
+	flag.IntVar(&cacheUpdateTimeoutSeconds, "cache-update-timeout-seconds", 10,
+		"Timeout in seconds for cache update operations. Default: 10.")
+
+	var metricsCollectionTimeoutSeconds int
+	flag.IntVar(&metricsCollectionTimeoutSeconds, "metrics-collection-timeout-seconds", 5,
+		"Timeout in seconds for metrics collection operations. Default: 5.")
+
+	var qps float32
+	flag.Float32Var(&qps, "qps", 50,
+		"QPS (queries per second) for Kubernetes API client. Default: 50.")
+
+	var burst int
+	flag.IntVar(&burst, "burst", 100,
+		"Burst limit for Kubernetes API client. Default: 100.")
+
 	flag.Parse()
 
 	// Initialize zen-sdk logger (configures controller-runtime logger automatically)
@@ -100,9 +116,18 @@ func main() {
 		os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional - fatal error, defer will run
 	}
 
-	// Set REST config QPS/Burst defaults (via zen-sdk helper)
+	// Set REST config QPS/Burst (use provided values or zen-sdk defaults)
 	restConfig := ctrl.GetConfigOrDie()
-	leader.ApplyRestConfigDefaults(restConfig)
+	if qps > 0 {
+		restConfig.QPS = qps
+	}
+	if burst > 0 {
+		restConfig.Burst = burst
+	}
+	// Apply zen-sdk defaults only if not explicitly set
+	if restConfig.QPS == 0 {
+		leader.ApplyRestConfigDefaults(restConfig)
+	}
 
 	// Configure manager options
 	mgrOpts := ctrl.Options{
@@ -126,7 +151,7 @@ func main() {
 	// Non-invasive Service-based approach: watches Services with zen-lead.io/enabled annotation
 	// This is Profile A (network-only, CRD-free) - always enabled
 	eventRecorder := mgr.GetEventRecorderFor("zen-lead-controller")
-	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder, maxCacheSizePerNamespace, maxConcurrentReconciles)
+	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder, maxCacheSizePerNamespace, maxConcurrentReconciles, time.Duration(cacheUpdateTimeoutSeconds)*time.Second, time.Duration(metricsCollectionTimeoutSeconds)*time.Second)
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", sdklog.Component("ServiceDirector"), sdklog.ErrorCode("CONTROLLER_SETUP_ERROR"))
 		os.Exit(1)
