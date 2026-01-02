@@ -36,6 +36,8 @@ func retryDoWithMetrics(ctx context.Context, cfg retry.Config, fn func() error, 
 	succeededAfterRetry := false
 
 	// Wrap the function to track attempts
+	// Note: succeededAfterRetry is captured by reference in the closure, so modifications
+	// inside wrappedFn are visible outside after retry.Do completes.
 	wrappedFn := func() error {
 		attemptCount++
 		err := fn()
@@ -56,6 +58,7 @@ func retryDoWithMetrics(ctx context.Context, cfg retry.Config, fn func() error, 
 		recorder.RecordRetryAttempt(namespace, service, operation, attemptLabel)
 
 		// If this attempt succeeds and it's not the first attempt, record success after retry
+		// This flag is captured by reference, so the change is visible after retry.Do returns
 		if err == nil && attemptCount > 1 {
 			succeededAfterRetry = true
 		}
@@ -67,6 +70,8 @@ func retryDoWithMetrics(ctx context.Context, cfg retry.Config, fn func() error, 
 	err := retry.Do(ctx, cfg, wrappedFn)
 
 	// Record success after retry if applicable
+	// Note: succeededAfterRetry was set inside the closure but is accessible here
+	// because closures capture variables by reference in Go
 	if succeededAfterRetry {
 		recorder.RecordRetrySuccessAfterRetry(namespace, service, operation)
 	}

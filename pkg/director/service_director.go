@@ -175,8 +175,9 @@ type ServiceDirectorReconciler struct {
 
 // cachedService holds a Service's selector for efficient matching
 type cachedService struct {
-	name     string
-	selector labels.Selector
+	name       string
+	selector   labels.Selector
+	lastAccess time.Time // For LRU eviction
 }
 
 // NewServiceDirectorReconciler creates a new ServiceDirectorReconciler

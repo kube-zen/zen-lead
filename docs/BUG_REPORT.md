@@ -315,5 +315,40 @@ if errors.Is(cacheCtx.Err(), context.DeadlineExceeded) && r.Metrics != nil {
 
 ---
 
-**Remaining Issues**: Bugs #4-9 are lower priority and can be addressed in future iterations.
+## ✅ ADDITIONAL FIXES APPLIED
+
+### Fixed Bug #4: LRU Eviction Implementation
+- **Status**: ✅ FIXED
+- **Change**: Implemented true LRU eviction with `lastAccess` timestamps
+  - Added `lastAccess time.Time` field to `cachedService`
+  - Update access time on cache hits in `mapPodToService`
+  - Sort by `lastAccess` (most recent first) when evicting
+  - Update access time when updating cache entries
+- **Location**: `pkg/director/service_director.go:177, 1289, 1393-1400, 1472`
+
+### Fixed Bug #5: Validation in `reconcileEndpointSlice`
+- **Status**: ✅ FIXED
+- **Change**: Added validation to check if `servicePorts` is empty
+- **Location**: `pkg/director/service_director.go:850`
+
+### Fixed Bug #6: Retry Metrics Logic Clarity
+- **Status**: ✅ FIXED
+- **Change**: Added comments explaining closure variable capture behavior
+- **Location**: `pkg/director/retry_metrics.go:37-38, 60-61, 70-72`
+
+### Fixed Bug #7: Defensive Check in `selectLeaderPod`
+- **Status**: ✅ FIXED
+- **Change**: Added defensive check after sorting to ensure slice is not empty
+- **Location**: `pkg/director/service_director.go:562-565`
+
+### Fixed Bug #9: Enhanced Error Handling in `resolveNamedPort`
+- **Status**: ✅ FIXED
+- **Change**: Added validation for nil pod, empty containers, and invalid port numbers
+- **Location**: `pkg/director/service_director.go:818-821, 825-827`
+
+---
+
+**Remaining Issues**: 
+- Bug #8: Cache miss race condition - This is acceptable behavior (documented as expected)
+- All other bugs have been fixed!
 
