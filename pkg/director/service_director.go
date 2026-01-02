@@ -1430,7 +1430,7 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 func (r *ServiceDirectorReconciler) updateOptedInServicesCacheLocked(ctx context.Context, namespace string, logger *sdklog.Logger) {
 	// Create tracing span for cache operation
 	tracer := observability.GetTracer("zen-lead-service-director")
-	cacheCtx, span := tracer.Start(ctx, "update_cache",
+	ctx, span := tracer.Start(ctx, "update_cache",
 		trace.WithAttributes(
 			attribute.String("namespace", namespace),
 		))
@@ -1438,7 +1438,7 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCacheLocked(ctx context
 
 	startTime := time.Now()
 	// Add timeout for cache update (10 seconds should be sufficient)
-	cacheCtx, cancel := context.WithTimeout(cacheCtx, 10*time.Second)
+	cacheCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	serviceList := &corev1.ServiceList{}
