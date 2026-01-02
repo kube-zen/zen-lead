@@ -474,6 +474,11 @@ func (r *Recorder) FailoverLatencySeconds() *prometheus.HistogramVec {
 	return r.failoverLatencySeconds
 }
 
+// APICallDurationSeconds returns the API call duration histogram vector (for testing)
+func (r *Recorder) APICallDurationSeconds() *prometheus.HistogramVec {
+	return r.apiCallDurationSeconds
+}
+
 // PortResolutionFailuresTotal returns the port resolution failures counter vector (for testing)
 func (r *Recorder) PortResolutionFailuresTotal() *prometheus.CounterVec {
 	return r.portResolutionFailuresTotal
