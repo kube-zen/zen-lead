@@ -4,12 +4,21 @@
 
 set -euo pipefail
 
-CONTEXT="${KUBECTL_CONTEXT:-k3d-astesterole}"
+CONTEXT="${KUBECTL_CONTEXT:-}"
 NAMESPACE="${TEST_NAMESPACE:-zen-lead-test}"
 TEST_DEPLOYMENT="${TEST_DEPLOYMENT:-test-app}"
 TEST_SERVICE="${TEST_SERVICE:-test-app}"
-IMAGE_TAG="${IMAGE_TAG:-test}"
+VERSION="${VERSION:-0.1.0-alpha}"
+IMAGE_TAG="${IMAGE_TAG:-${VERSION}}"
+NUM_FAILOVERS="${NUM_FAILOVERS:-50}"
 REPORT_FILE="${REPORT_FILE:-/tmp/zen-lead-functional-test-report-$(date +%Y%m%d-%H%M%S).md}"
+
+# Validate context is provided
+if [ -z "$CONTEXT" ]; then
+    echo "Error: KUBECTL_CONTEXT must be set or provided as first argument"
+    echo "Usage: $0 [kubectl-context]"
+    exit 1
+fi
 
 # Colors
 RED='\033[0;31m'
@@ -40,9 +49,11 @@ init_report() {
 # zen-lead Functional Test Report
 
 **Test Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+**Version:** $VERSION
+**Image Tag:** $IMAGE_TAG
 **Cluster Context:** $CONTEXT
 **Namespace:** $NAMESPACE
-**Image Tag:** $IMAGE_TAG
+**Number of Failovers:** $NUM_FAILOVERS
 
 ## Test Summary
 
@@ -377,21 +388,25 @@ test_failover() {
 }
 
 test_multiple_failovers() {
-    log "Testing multiple failovers..."
+    log "Testing $NUM_FAILOVERS failovers..."
     append_report ""
-    append_report "## Multiple Failover Test"
+    append_report "## Multiple Failover Test ($NUM_FAILOVERS failovers)"
     append_report ""
     
-    local num_failovers=3
+    local num_failovers=$NUM_FAILOVERS
     local total_downtime=0
     local success_count=0
     
     for i in $(seq 1 $num_failovers); do
-        log "Failover attempt $i/$num_failovers..."
+        # Show progress every 10 failovers or for first/last 5
+        if [ $i -le 5 ] || [ $i -ge $((num_failovers - 4)) ] || [ $((i % 10)) -eq 0 ]; then
+            log "Failover attempt $i/$num_failovers..."
+        fi
         
         local leader=$(get_leader_pod)
         if [ -z "$leader" ]; then
             log_error "Could not determine leader pod for attempt $i"
+            append_report "**Failover $i:** ❌ Failed (could not determine leader)"
             continue
         fi
         
@@ -403,7 +418,7 @@ test_multiple_failovers() {
         local new_leader=""
         
         while [ $elapsed -lt $max_wait ]; do
-            sleep 1
+            sleep 0.5
             elapsed=$((elapsed + 1))
             
             new_leader=$(get_leader_pod)
@@ -413,11 +428,17 @@ test_multiple_failovers() {
                 total_downtime=$(echo "$total_downtime + $downtime" | bc)
                 success_count=$((success_count + 1))
                 
-                log_success "Failover $i completed in ${downtime}s"
-                append_report "**Failover $i:** ${downtime}s (from $leader to $new_leader)"
+                # Only log details for first/last 5 or every 10th
+                if [ $i -le 5 ] || [ $i -ge $((num_failovers - 4)) ] || [ $((i % 10)) -eq 0 ]; then
+                    log_success "Failover $i completed in ${downtime}s"
+                    append_report "**Failover $i:** ${downtime}s (from $leader to $new_leader)"
+                else
+                    # Store for summary statistics
+                    append_report "**Failover $i:** ${downtime}s" > /dev/null 2>&1 || true
+                fi
                 
-                # Wait a bit before next failover
-                sleep 5
+                # Wait a bit before next failover (reduced for faster testing)
+                sleep 2
                 break
             fi
         done
@@ -429,11 +450,28 @@ test_multiple_failovers() {
     done
     
     if [ $success_count -gt 0 ]; then
-        local avg_downtime=$(echo "scale=2; $total_downtime / $success_count" | bc)
+        local avg_downtime=$(echo "scale=3; $total_downtime / $success_count" | bc)
+        local min_downtime=$(echo "scale=3; $total_downtime / $success_count" | bc)  # Will be calculated from individual times
+        local max_downtime=$(echo "scale=3; $total_downtime / $success_count" | bc)  # Will be calculated from individual times
+        
+        # Calculate min/max from report (simplified - we'll use avg for now)
         log_success "Average failover time: ${avg_downtime}s (${success_count}/${num_failovers} successful)"
         append_report ""
-        append_report "**Average Failover Time:** ${avg_downtime}s"
-        append_report "**Success Rate:** ${success_count}/${num_failovers}"
+        append_report "**Statistics:**"
+        append_report "- **Total Failovers:** $num_failovers"
+        append_report "- **Successful:** ${success_count}"
+        append_report "- **Failed:** $((num_failovers - success_count))"
+        append_report "- **Success Rate:** $(echo "scale=1; $success_count * 100 / $num_failovers" | bc)%"
+        append_report "- **Average Failover Time:** ${avg_downtime}s"
+        append_report "- **Total Test Duration:** ~$(echo "scale=0; ($num_failovers * 2) / 60" | bc) minutes"
+    else
+        log_error "No successful failovers!"
+        append_report ""
+        append_report "**Statistics:**"
+        append_report "- **Total Failovers:** $num_failovers"
+        append_report "- **Successful:** 0"
+        append_report "- **Failed:** $num_failovers"
+        append_report "- **Success Rate:** 0%"
     fi
 }
 
@@ -448,8 +486,11 @@ cleanup() {
 # Main execution
 main() {
     log "Starting zen-lead functional test"
+    log "Version: $VERSION"
+    log "Image Tag: $IMAGE_TAG"
     log "Context: $CONTEXT"
     log "Namespace: $NAMESPACE"
+    log "Number of Failovers: $NUM_FAILOVERS"
     log "Report: $REPORT_FILE"
     
     init_report
