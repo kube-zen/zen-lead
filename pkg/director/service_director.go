@@ -1388,7 +1388,17 @@ func (r *ServiceDirectorReconciler) mapEndpointSliceToService(ctx context.Contex
 
 // updateOptedInServicesCache updates the cache for a specific namespace
 // Uses context timeout to prevent hanging on slow API server
+// This function acquires its own lock - use updateOptedInServicesCacheLocked if lock is already held
 func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Context, namespace string, logger *sdklog.Logger) {
+	r.cacheMu.Lock()
+	defer r.cacheMu.Unlock()
+	r.updateOptedInServicesCacheLocked(ctx, namespace, logger)
+}
+
+// updateOptedInServicesCacheLocked updates the cache for a specific namespace
+// Assumes cacheMu write lock is already held (caller must ensure this)
+// Uses context timeout to prevent hanging on slow API server
+func (r *ServiceDirectorReconciler) updateOptedInServicesCacheLocked(ctx context.Context, namespace string, logger *sdklog.Logger) {
 	startTime := time.Now()
 	// Add timeout for cache update (10 seconds should be sufficient)
 	cacheCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -1443,13 +1453,11 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 			sdklog.Int("cached", len(cached)))
 	}
 	
-	r.cacheMu.Lock()
 	// Initialize map if nil (defensive programming)
 	if r.optedInServicesCache == nil {
 		r.optedInServicesCache = make(map[string][]*cachedService)
 	}
 	r.optedInServicesCache[namespace] = cached
-	r.cacheMu.Unlock()
 
 	// Record cache metrics
 	if r.Metrics != nil {
