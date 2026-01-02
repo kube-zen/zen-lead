@@ -433,3 +433,816 @@ func TestServiceDirectorReconciler_Reconcile_PortResolutionFailure(t *testing.T)
 	// Note: Due to promauto's global registration, we can't easily verify exact values
 	// The test verifies that RecordPortResolutionFailure was called during reconciliation
 }
+
+func TestFilterGitOpsLabels(t *testing.T) {
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		expected map[string]string
+	}{
+		{
+			name:     "nil labels",
+			labels:   nil,
+			expected: map[string]string{},
+		},
+		{
+			name:     "empty labels",
+			labels:   map[string]string{},
+			expected: map[string]string{},
+		},
+		{
+			name: "no GitOps labels",
+			labels: map[string]string{
+				"app":     "my-app",
+				"version": "1.0",
+			},
+			expected: map[string]string{
+				"app":     "my-app",
+				"version": "1.0",
+			},
+		},
+		{
+			name: "filter ArgoCD labels",
+			labels: map[string]string{
+				"app":                         "my-app",
+				"app.kubernetes.io/instance":  "argocd-instance",
+				"argocd.argoproj.io/instance": "my-instance",
+			},
+			expected: map[string]string{
+				"app": "my-app",
+			},
+		},
+		{
+			name: "filter Flux labels",
+			labels: map[string]string{
+				"app":                              "my-app",
+				"fluxcd.io/part-of":                "flux-system",
+				"kustomize.toolkit.fluxcd.io/name": "my-kustomization",
+			},
+			expected: map[string]string{
+				"app": "my-app",
+			},
+		},
+		{
+			name: "filter all GitOps labels",
+			labels: map[string]string{
+				"app":                         "my-app",
+				"app.kubernetes.io/instance":  "instance",
+				"app.kubernetes.io/part-of":   "part-of",
+				"app.kubernetes.io/version":   "1.0",
+				"argocd.argoproj.io/instance": "argocd",
+				"fluxcd.io/part-of":           "flux",
+			},
+			expected: map[string]string{
+				"app": "my-app",
+			},
+		},
+		{
+			name: "filter app.kubernetes.io/managed-by (always filtered regardless of value)",
+			labels: map[string]string{
+				"app":                          "my-app",
+				"app.kubernetes.io/managed-by": "zen-lead", // Filtered even if our value
+			},
+			expected: map[string]string{
+				"app": "my-app",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterGitOpsLabels(tt.labels)
+			if len(result) != len(tt.expected) {
+				t.Errorf("filterGitOpsLabels() length = %d, expected %d", len(result), len(tt.expected))
+			}
+			for k, v := range tt.expected {
+				if result[k] != v {
+					t.Errorf("filterGitOpsLabels() [%s] = %v, expected %v", k, result[k], v)
+				}
+			}
+			for k := range result {
+				if _, ok := tt.expected[k]; !ok {
+					t.Errorf("filterGitOpsLabels() unexpected key: %s", k)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_MapPodToService(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name              string
+		pod               *corev1.Pod
+		services          []*corev1.Service
+		cachePrePopulated bool
+		expectedRequests  int
+		expectCacheMiss   bool
+	}{
+		{
+			name: "cache hit - pod matches one service",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
+					Labels: map[string]string{
+						"app": "my-app",
+					},
+				},
+			},
+			services: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "my-service",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "my-app",
+						},
+					},
+				},
+			},
+			cachePrePopulated: true,
+			expectedRequests:  1,
+			expectCacheMiss:   false,
+		},
+		{
+			name: "cache miss - triggers cache refresh",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
+					Labels: map[string]string{
+						"app": "my-app",
+					},
+				},
+			},
+			services: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "my-service",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "my-app",
+						},
+					},
+				},
+			},
+			cachePrePopulated: false,
+			expectedRequests:  1,
+			expectCacheMiss:   true,
+		},
+		{
+			name: "pod matches multiple services",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
+					Labels: map[string]string{
+						"app":     "my-app",
+						"version": "v1",
+					},
+				},
+			},
+			services: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-1",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "my-app",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-2",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app":     "my-app",
+							"version": "v1",
+						},
+					},
+				},
+			},
+			cachePrePopulated: true,
+			expectedRequests:  2,
+			expectCacheMiss:   false,
+		},
+		{
+			name: "pod matches no services",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
+					Labels: map[string]string{
+						"app": "other-app",
+					},
+				},
+			},
+			services: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "my-service",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "my-app",
+						},
+					},
+				},
+			},
+			cachePrePopulated: true,
+			expectedRequests:  0,
+			expectCacheMiss:   false,
+		},
+		{
+			name: "service without annotation not cached",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-1",
+					Namespace: "default",
+					Labels: map[string]string{
+						"app": "my-app",
+					},
+				},
+			},
+			services: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "my-service",
+						Namespace: "default",
+						// No annotation
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "my-app",
+						},
+					},
+				},
+			},
+			cachePrePopulated: false,
+			expectedRequests:  0,
+			expectCacheMiss:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fake client
+			objs := []client.Object{tt.pod}
+			for _, svc := range tt.services {
+				objs = append(objs, svc)
+			}
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objs...).
+				Build()
+
+			// Create reconciler
+			recorder := metrics.NewRecorder()
+			eventRecorder := record.NewFakeRecorder(10)
+			r := &ServiceDirectorReconciler{
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: eventRecorder,
+				Metrics:  recorder,
+			}
+
+			// Pre-populate cache if needed
+			if tt.cachePrePopulated {
+				logger := packageLogger.WithContext(context.Background())
+				r.updateOptedInServicesCache(context.Background(), tt.pod.Namespace, logger)
+			}
+
+			// Test mapPodToService
+			requests := r.mapPodToService(context.Background(), tt.pod)
+			if len(requests) != tt.expectedRequests {
+				t.Errorf("mapPodToService() returned %d requests, expected %d", len(requests), tt.expectedRequests)
+			}
+
+			// Verify cache state
+			r.cacheMu.RLock()
+			cached := r.optedInServicesCache[tt.pod.Namespace]
+			r.cacheMu.RUnlock()
+			if tt.cachePrePopulated && len(cached) == 0 {
+				t.Error("Expected cache to be populated")
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_MapEndpointSliceToService(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name             string
+		endpointSlice    *discoveryv1.EndpointSlice
+		expectedRequests int
+		expectNil        bool
+	}{
+		{
+			name: "valid EndpointSlice with source service label",
+			endpointSlice: &discoveryv1.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service-leader",
+					Namespace: "default",
+					Labels: map[string]string{
+						LabelEndpointSliceManagedBy: LabelEndpointSliceManagedByValue,
+						LabelSourceService:          "my-service",
+					},
+				},
+			},
+			expectedRequests: 1,
+			expectNil:        false,
+		},
+		{
+			name: "EndpointSlice without managed-by label",
+			endpointSlice: &discoveryv1.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service-leader",
+					Namespace: "default",
+					Labels: map[string]string{
+						LabelSourceService: "my-service",
+					},
+				},
+			},
+			expectedRequests: 0,
+			expectNil:        true,
+		},
+		{
+			name: "EndpointSlice without source service label",
+			endpointSlice: &discoveryv1.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service-leader",
+					Namespace: "default",
+					Labels: map[string]string{
+						LabelEndpointSliceManagedBy: LabelEndpointSliceManagedByValue,
+					},
+				},
+			},
+			expectedRequests: 0,
+			expectNil:        true,
+		},
+		{
+			name: "EndpointSlice with nil labels",
+			endpointSlice: &discoveryv1.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "my-service-leader",
+					Namespace: "default",
+				},
+			},
+			expectedRequests: 0,
+			expectNil:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fake client
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				Build()
+
+			// Create reconciler
+			recorder := metrics.NewRecorder()
+			eventRecorder := record.NewFakeRecorder(10)
+			r := &ServiceDirectorReconciler{
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: eventRecorder,
+				Metrics:  recorder,
+			}
+
+			// Test mapEndpointSliceToService
+			requests := r.mapEndpointSliceToService(context.Background(), tt.endpointSlice)
+			if tt.expectNil && requests != nil {
+				t.Errorf("mapEndpointSliceToService() returned %d requests, expected nil", len(requests))
+			}
+			if !tt.expectNil && len(requests) != tt.expectedRequests {
+				t.Errorf("mapEndpointSliceToService() returned %d requests, expected %d", len(requests), tt.expectedRequests)
+			}
+			if !tt.expectNil && len(requests) > 0 {
+				if requests[0].Name != "my-service" || requests[0].Namespace != "default" {
+					t.Errorf("mapEndpointSliceToService() returned wrong service: %v", requests[0])
+				}
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_UpdateOptedInServicesCache(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name              string
+		namespace         string
+		services          []*corev1.Service
+		expectedCacheSize int
+		expectError       bool
+	}{
+		{
+			name:      "cache with opted-in services",
+			namespace: "default",
+			services: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-1",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "app-1",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-2",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "app-2",
+						},
+					},
+				},
+			},
+			expectedCacheSize: 2,
+			expectError:       false,
+		},
+		{
+			name:      "cache filters non-opted-in services",
+			namespace: "default",
+			services: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-1",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "app-1",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-2",
+						Namespace: "default",
+						// No annotation
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "app-2",
+						},
+					},
+				},
+			},
+			expectedCacheSize: 1,
+			expectError:       false,
+		},
+		{
+			name:      "cache filters services without selector",
+			namespace: "default",
+			services: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-1",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "app-1",
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-2",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						// No selector
+					},
+				},
+			},
+			expectedCacheSize: 1,
+			expectError:       false,
+		},
+		{
+			name:              "empty namespace",
+			namespace:         "default",
+			services:          []*corev1.Service{},
+			expectedCacheSize: 0,
+			expectError:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fake client
+			objs := make([]client.Object, 0, len(tt.services))
+			for _, svc := range tt.services {
+				objs = append(objs, svc)
+			}
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objs...).
+				Build()
+
+			// Create reconciler
+			recorder := metrics.NewRecorder()
+			eventRecorder := record.NewFakeRecorder(10)
+			r := &ServiceDirectorReconciler{
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: eventRecorder,
+				Metrics:  recorder,
+			}
+
+			// Test updateOptedInServicesCache
+			logger := packageLogger.WithContext(context.Background())
+			r.updateOptedInServicesCache(context.Background(), tt.namespace, logger)
+
+			// Verify cache
+			r.cacheMu.RLock()
+			cached := r.optedInServicesCache[tt.namespace]
+			r.cacheMu.RUnlock()
+
+			if len(cached) != tt.expectedCacheSize {
+				t.Errorf("updateOptedInServicesCache() cache size = %d, expected %d", len(cached), tt.expectedCacheSize)
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_UpdateOptedInServicesCacheForService(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name              string
+		initialServices   []*corev1.Service
+		updatedService    *corev1.Service
+		expectedCacheSize int
+		expectInCache     bool
+	}{
+		{
+			name: "add service to cache",
+			initialServices: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-1",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "app-1",
+						},
+					},
+				},
+			},
+			updatedService: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "service-2",
+					Namespace: "default",
+					Annotations: map[string]string{
+						AnnotationEnabledService: "true",
+					},
+				},
+				Spec: corev1.ServiceSpec{
+					Selector: map[string]string{
+						"app": "app-2",
+					},
+				},
+			},
+			expectedCacheSize: 2,
+			expectInCache:     true,
+		},
+		{
+			name: "remove service from cache when annotation removed",
+			initialServices: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-1",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "app-1",
+						},
+					},
+				},
+			},
+			updatedService: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "service-1",
+					Namespace: "default",
+					// No annotation
+				},
+				Spec: corev1.ServiceSpec{
+					Selector: map[string]string{
+						"app": "app-1",
+					},
+				},
+			},
+			expectedCacheSize: 0,
+			expectInCache:     false,
+		},
+		{
+			name: "update service selector in cache",
+			initialServices: []*corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "service-1",
+						Namespace: "default",
+						Annotations: map[string]string{
+							AnnotationEnabledService: "true",
+						},
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "app-1",
+						},
+					},
+				},
+			},
+			updatedService: &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "service-1",
+					Namespace: "default",
+					Annotations: map[string]string{
+						AnnotationEnabledService: "true",
+					},
+				},
+				Spec: corev1.ServiceSpec{
+					Selector: map[string]string{
+						"app": "app-1-updated",
+					},
+				},
+			},
+			expectedCacheSize: 1,
+			expectInCache:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fake client
+			objs := make([]client.Object, 0, len(tt.initialServices))
+			for _, svc := range tt.initialServices {
+				objs = append(objs, svc)
+			}
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objs...).
+				Build()
+
+			// Create reconciler
+			recorder := metrics.NewRecorder()
+			eventRecorder := record.NewFakeRecorder(10)
+			r := &ServiceDirectorReconciler{
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: eventRecorder,
+				Metrics:  recorder,
+			}
+
+			// Initialize cache
+			logger := packageLogger.WithContext(context.Background())
+			r.updateOptedInServicesCache(context.Background(), "default", logger)
+
+			// Update cache for service
+			r.updateOptedInServicesCacheForService(tt.updatedService, logger)
+
+			// Verify cache
+			r.cacheMu.RLock()
+			cached := r.optedInServicesCache["default"]
+			r.cacheMu.RUnlock()
+
+			if len(cached) != tt.expectedCacheSize {
+				t.Errorf("updateOptedInServicesCacheForService() cache size = %d, expected %d", len(cached), tt.expectedCacheSize)
+			}
+
+			// Check if service is in cache
+			found := false
+			for _, cachedSvc := range cached {
+				if cachedSvc.name == tt.updatedService.Name {
+					found = true
+					break
+				}
+			}
+			if found != tt.expectInCache {
+				t.Errorf("updateOptedInServicesCacheForService() service in cache = %v, expected %v", found, tt.expectInCache)
+			}
+		})
+	}
+}
+
+func TestServiceDirectorReconciler_UpdateResourceTotals(t *testing.T) {
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	discoveryv1.AddToScheme(scheme)
+
+	// Create leader Service
+	leaderService := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-service-leader",
+			Namespace: "default",
+			Labels: map[string]string{
+				LabelManagedBy: LabelManagedByValue,
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			// No selector (leader service)
+		},
+	}
+
+	// Create EndpointSlice
+	endpointSlice := &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-service-leader",
+			Namespace: "default",
+			Labels: map[string]string{
+				LabelEndpointSliceManagedBy: LabelEndpointSliceManagedByValue,
+			},
+		},
+	}
+
+	// Create fake client
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(leaderService, endpointSlice).
+		Build()
+
+	// Create reconciler
+	recorder := metrics.NewRecorder()
+	eventRecorder := record.NewFakeRecorder(10)
+	r := &ServiceDirectorReconciler{
+		Client:   fakeClient,
+		Scheme:   scheme,
+		Recorder: eventRecorder,
+		Metrics:  recorder,
+	}
+
+	// Test updateResourceTotals
+	logger := packageLogger.WithContext(context.Background())
+	r.updateResourceTotals(context.Background(), "default", logger)
+
+	// Verify metrics were called (functions executed without panic)
+	// Note: Due to promauto's global registration, we can't easily verify exact values
+	// The test verifies that RecordLeaderServicesTotal and RecordEndpointSlicesTotal were called
+}

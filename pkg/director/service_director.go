@@ -1350,6 +1350,10 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCache(ctx context.Conte
 		})
 	}
 	r.cacheMu.Lock()
+	// Initialize map if nil (defensive programming)
+	if r.optedInServicesCache == nil {
+		r.optedInServicesCache = make(map[string][]*cachedService)
+	}
 	r.optedInServicesCache[namespace] = cached
 	r.cacheMu.Unlock()
 
