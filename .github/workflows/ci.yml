@@ -89,10 +89,9 @@ jobs:
       - name: Run vulnerability scan
         env:
           GOWORK: off
-          PATH: ${{ env.PATH }}:${{ env.GOPATH }}/bin:${{ env.GOROOT }}/bin
         run: |
           echo "Scanning for vulnerabilities..."
-          $HOME/go/bin/govulncheck ./... || {
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./... || {
             echo "❌ Vulnerabilities found"
             exit 1
           }
