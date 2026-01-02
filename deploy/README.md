@@ -118,20 +118,36 @@ The dashboard includes:
 
 All metrics are prefixed with `zen_lead_`:
 
-- `zen_lead_leader_duration_seconds` - How long a pod has been leader
-- `zen_lead_failover_count_total` - Total failovers
+### Core Metrics
+- `zen_lead_leader_duration_seconds` - How long a pod has been leader (gauge)
+- `zen_lead_failover_count_total` - Total failovers (counter)
 - `zen_lead_reconciliation_duration_seconds` - Reconciliation duration histogram
-- `zen_lead_pods_available` - Ready pods count
-- `zen_lead_port_resolution_failures_total` - Port resolution failures
-- `zen_lead_reconciliation_errors_total` - Reconciliation errors
-- `zen_lead_leader_services_total` - Leader services count
-- `zen_lead_endpointslices_total` - EndpointSlices count
-- `zen_lead_sticky_leader_hits_total` - Sticky leader hits
-- `zen_lead_sticky_leader_misses_total` - Sticky leader misses
-- `zen_lead_leader_selection_attempts_total` - Leader selection attempts
-- `zen_lead_leader_pod_age_seconds` - Leader pod age
-- `zen_lead_leader_service_without_endpoints` - Services without endpoints
-- `zen_lead_reconciliations_total` - Total reconciliations
+- `zen_lead_pods_available` - Ready pods count (gauge)
+- `zen_lead_port_resolution_failures_total` - Port resolution failures (counter)
+- `zen_lead_reconciliation_errors_total` - Reconciliation errors (counter)
+- `zen_lead_leader_services_total` - Leader services count (gauge)
+- `zen_lead_endpointslices_total` - EndpointSlices count (gauge)
+- `zen_lead_sticky_leader_hits_total` - Sticky leader hits (counter)
+- `zen_lead_sticky_leader_misses_total` - Sticky leader misses (counter)
+- `zen_lead_leader_selection_attempts_total` - Leader selection attempts (counter)
+- `zen_lead_leader_pod_age_seconds` - Leader pod age (gauge)
+- `zen_lead_leader_service_without_endpoints` - Services without endpoints (gauge, 1=yes, 0=no)
+- `zen_lead_reconciliations_total` - Total reconciliations (counter)
+- `zen_lead_leader_stable` - Leader stability indicator (gauge)
+- `zen_lead_endpoint_write_errors_total` - EndpointSlice write errors (counter)
+
+### Performance Metrics
+- `zen_lead_cache_size` - Cache size per namespace (gauge)
+- `zen_lead_cache_update_duration_seconds` - Cache update duration histogram
+- `zen_lead_cache_hits_total` - Cache hits (counter)
+- `zen_lead_cache_misses_total` - Cache misses (counter)
+- `zen_lead_api_call_duration_seconds` - API call latency histogram
+- `zen_lead_failover_latency_seconds` - Failover latency histogram (time from detection to new leader)
+
+### Reliability Metrics
+- `zen_lead_retry_attempts_total` - Retry attempts for API operations (counter)
+- `zen_lead_retry_success_after_retry_total` - Operations that succeeded after retry (counter)
+- `zen_lead_timeout_occurrences_total` - Timeout occurrences (counter)
 
 ## Troubleshooting
 

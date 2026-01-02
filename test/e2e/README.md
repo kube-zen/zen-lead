@@ -20,11 +20,16 @@ go test -tags=e2e ./test/e2e/ -v
 
 ## Test Coverage
 
-- ✅ Leader Service creation
-- ✅ EndpointSlice creation with exactly one endpoint
-- ✅ Failover when leader becomes NotReady
-- ✅ Cleanup when annotation removed
-- ✅ Port resolution fail-closed behavior
+### Core Functionality
+- ✅ Leader Service creation (`TestLeaderServiceCreation`)
+- ✅ EndpointSlice creation with exactly one endpoint (`TestEndpointSliceCreation`)
+- ✅ Failover when leader becomes NotReady (`TestFailover`)
+- ✅ Cleanup when annotation removed (`TestCleanup`)
+- ✅ Port resolution fail-closed behavior (`TestPortResolutionFailClosed`)
+
+### Concurrency & Edge Cases
+- ✅ Concurrent Service updates (`TestConcurrentServiceUpdates`)
+- ✅ Multiple Services in same namespace (`TestMultipleServicesSameNamespace`)
 
 ## Setup
 
