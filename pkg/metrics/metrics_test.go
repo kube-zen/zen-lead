@@ -224,6 +224,29 @@ func TestRecordCacheMetrics(t *testing.T) {
 	// Function executed without panic - test passes
 }
 
+func TestRecordFailoverLatency(t *testing.T) {
+	recorder := NewRecorder()
+	recorder.RecordFailoverLatency("default", "my-service", "notReady", 0.5)
+
+	// Verify metric was observed
+	failoverLatencyMetric := recorder.FailoverLatencySeconds()
+	if failoverLatencyMetric == nil {
+		t.Fatal("FailoverLatencySeconds() returned nil")
+	}
+
+	// Get metric value
+	metric, err := failoverLatencyMetric.GetMetricWithLabelValues("default", "my-service", "notReady")
+	if err != nil {
+		t.Fatalf("Failed to get metric: %v", err)
+	}
+
+	// Verify histogram value
+	histogram := metric.(prometheus.Histogram)
+	if histogram == nil {
+		t.Fatal("Metric is not a Histogram")
+	}
+}
+
 func TestMetricsEdgeCases(t *testing.T) {
 	recorder := NewRecorder()
 
