@@ -166,9 +166,13 @@ zen-lead uses `zen-sdk/pkg/retry` with default settings:
 
 ### Context Timeouts
 
-zen-lead uses context timeouts for long-running operations:
-- **Cache updates**: 10 seconds
-- **Metrics collection**: 5 seconds
+zen-lead uses configurable context timeouts for long-running operations:
+- **Cache updates**: 10 seconds (default, configurable via `--cache-update-timeout-seconds` or Helm `controller.cacheUpdateTimeoutSeconds`)
+- **Metrics collection**: 5 seconds (default, configurable via `--metrics-collection-timeout-seconds` or Helm `controller.metricsCollectionTimeoutSeconds`)
+
+**Configuration:**
+- Via Helm chart: Set `controller.cacheUpdateTimeoutSeconds` and `controller.metricsCollectionTimeoutSeconds` in `values.yaml`
+- Via command-line flags: `--cache-update-timeout-seconds` and `--metrics-collection-timeout-seconds`
 
 **Monitoring:**
 - `zen_lead_timeout_occurrences_total`: Track timeout frequency
@@ -177,7 +181,7 @@ zen-lead uses context timeouts for long-running operations:
 **When Timeouts Occur:**
 - Check API server responsiveness
 - Verify network latency
-- Review timeout values (may need adjustment)
+- Increase timeout values if needed (especially for large clusters)
 
 ---
 
@@ -258,15 +262,6 @@ zen-lead uses context timeouts for long-running operations:
 - Memory: <500 MB
 
 ---
-
-## Future Optimizations
-
-### Planned Improvements
-
-1. **Configurable cache limits** via environment variables
-2. **Periodic cache cleanup** for unused namespaces
-3. **Reconciliation interval tuning** for high-churn workloads
-4. **Batch operations** for multiple Service updates
 
 ---
 

@@ -445,7 +445,7 @@ kubectl get deployment zen-lead-controller-manager -o yaml | grep -i qps
 
 **Resolution:**
 1. Check API server load and capacity
-2. Review QPS/Burst settings (default: 20 QPS, 30 Burst)
+2. Review QPS/Burst settings (default: 50 QPS, 100 Burst, configurable via `controller.qps` and `controller.burst`)
 3. Reduce `controller.maxConcurrentReconciles` if causing overload
 4. Check network latency to API server
 
