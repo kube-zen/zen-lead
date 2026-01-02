@@ -13,10 +13,25 @@ IMAGE_TAG="${IMAGE_TAG:-${VERSION}}"
 NUM_FAILOVERS="${NUM_FAILOVERS:-50}"
 REPORT_FILE="${REPORT_FILE:-/tmp/zen-lead-functional-test-report-$(date +%Y%m%d-%H%M%S).md}"
 
+# Accept context as first argument if not set via environment
+if [ -z "$CONTEXT" ] && [ $# -gt 0 ]; then
+    CONTEXT="$1"
+fi
+
 # Validate context is provided
 if [ -z "$CONTEXT" ]; then
     echo "Error: KUBECTL_CONTEXT must be set or provided as first argument"
-    echo "Usage: $0 [kubectl-context]"
+    echo "Usage: $0 <kubectl-context> [options]"
+    echo ""
+    echo "Environment variables:"
+    echo "  VERSION          - Version tag (default: 0.1.0-alpha)"
+    echo "  IMAGE_TAG        - Image tag (default: VERSION)"
+    echo "  NUM_FAILOVERS    - Number of failovers to test (default: 50)"
+    echo "  TEST_NAMESPACE   - Namespace for testing (default: zen-lead-test)"
+    echo ""
+    echo "Example:"
+    echo "  $0 my-cluster-context"
+    echo "  VERSION=0.2.0 NUM_FAILOVERS=100 $0 my-cluster-context"
     exit 1
 fi
 
