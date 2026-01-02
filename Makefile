@@ -167,3 +167,26 @@ coverage: test
 	@echo ""
 	@COVERAGE=$$(GOWORK=off go tool cover -func=coverage.out | grep "^total:" | awk '{print $$3}'); \
 	echo "$(GREEN)Total Coverage: $$COVERAGE$(NC)"
+
+## test-e2e: Run E2E tests (requires kind cluster)
+test-e2e:
+	@echo "$(GREEN)Running E2E tests...$(NC)"
+	@if [ -z "$$KUBECONFIG" ] && [ ! -f "$$HOME/.kube/zen-lead-e2e-config" ]; then \
+		echo "$(YELLOW)⚠️  KUBECONFIG not set. Run 'make test-e2e-setup' first$(NC)"; \
+		exit 1; \
+	fi
+	@GOWORK=off go test -v -tags=e2e -timeout=10m ./test/e2e/...
+	@echo "$(GREEN)✅ E2E tests complete$(NC)"
+
+## test-e2e-setup: Setup kind cluster for E2E tests
+test-e2e-setup:
+	@echo "$(GREEN)Setting up E2E test environment...$(NC)"
+	@./test/e2e/setup_kind.sh create
+	@echo "$(GREEN)✅ E2E test environment ready$(NC)"
+	@echo "$(YELLOW)Export kubeconfig: export KUBECONFIG=$$(./test/e2e/setup_kind.sh kubeconfig)$(NC)"
+
+## test-e2e-cleanup: Cleanup kind cluster for E2E tests
+test-e2e-cleanup:
+	@echo "$(GREEN)Cleaning up E2E test environment...$(NC)"
+	@./test/e2e/setup_kind.sh delete
+	@echo "$(GREEN)✅ E2E test environment cleaned up$(NC)"
