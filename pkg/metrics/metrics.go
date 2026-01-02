@@ -47,6 +47,7 @@ type Recorder struct {
 	cacheHitsTotal                *prometheus.CounterVec
 	cacheMissesTotal              *prometheus.CounterVec
 	timeoutOccurrencesTotal       *prometheus.CounterVec
+	failoverLatencySeconds        *prometheus.HistogramVec
 }
 
 var (
@@ -276,6 +277,16 @@ func NewRecorder() *Recorder {
 			},
 			[]string{"namespace", "operation"}, // operation: cache_update, metrics_collection
 		),
+
+		// Failover latency: time from leader unhealthy detection to new leader selected
+		failoverLatencySeconds: promauto.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "zen_lead_failover_latency_seconds",
+				Help:    "Time from leader unhealthy detection to new leader selected in seconds",
+				Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0},
+			},
+			[]string{"namespace", "service", "reason"}, // reason: notReady, terminating, noIP, noneReady
+		),
 	}
 
 	globalRecorder = recorder
@@ -413,6 +424,11 @@ func (r *Recorder) RecordCacheMiss(namespace string) {
 // RecordTimeout records an operation timeout.
 func (r *Recorder) RecordTimeout(namespace, operation string) {
 	r.timeoutOccurrencesTotal.WithLabelValues(namespace, operation).Inc()
+}
+
+// RecordFailoverLatency records the time from leader unhealthy detection to new leader selected
+func (r *Recorder) RecordFailoverLatency(namespace, service, reason string, latencySeconds float64) {
+	r.failoverLatencySeconds.WithLabelValues(namespace, service, reason).Observe(latencySeconds)
 }
 
 // Exported getters for testing (access to metric vectors)

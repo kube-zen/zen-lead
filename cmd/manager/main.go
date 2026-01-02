@@ -60,6 +60,10 @@ func main() {
 	flag.BoolVar(&enableLeaderGroups, "enable-leader-groups", false,
 		"Enable LeaderGroup CRD support (Profile C). Default: false (Profile A only, CRD-free).")
 
+	var maxCacheSizePerNamespace int
+	flag.IntVar(&maxCacheSizePerNamespace, "max-cache-size-per-namespace", 1000,
+		"Maximum number of cached services per namespace (0 = unlimited). Default: 1000.")
+
 	flag.Parse()
 
 	// Initialize zen-sdk logger (configures controller-runtime logger automatically)
@@ -118,7 +122,7 @@ func main() {
 	// Non-invasive Service-based approach: watches Services with zen-lead.io/enabled annotation
 	// This is Profile A (network-only, CRD-free) - always enabled
 	eventRecorder := mgr.GetEventRecorderFor("zen-lead-controller")
-	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder)
+	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder, maxCacheSizePerNamespace)
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", sdklog.Component("ServiceDirector"), sdklog.ErrorCode("CONTROLLER_SETUP_ERROR"))
 		os.Exit(1)
@@ -147,7 +151,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	// Add custom readiness check that verifies controller can reconcile
+	controllerHealthChecker := director.NewControllerHealthChecker(reconciler)
+	if err := mgr.AddReadyzCheck("readyz", controllerHealthChecker.Check); err != nil {
 		setupLog.Error(err, "unable to set up ready check", sdklog.ErrorCode("READY_CHECK_ERROR"))
 		os.Exit(1)
 	}

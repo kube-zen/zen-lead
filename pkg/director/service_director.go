@@ -181,14 +181,17 @@ type cachedService struct {
 }
 
 // NewServiceDirectorReconciler creates a new ServiceDirectorReconciler
-func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder) *ServiceDirectorReconciler {
+func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, maxCacheSizePerNamespace int) *ServiceDirectorReconciler {
+	if maxCacheSizePerNamespace <= 0 {
+		maxCacheSizePerNamespace = 1000 // Default: 1000 services per namespace
+	}
 	return &ServiceDirectorReconciler{
 		Client:                   client,
 		Scheme:                   scheme,
 		Recorder:                 recorder,
 		Metrics:                  metrics.NewRecorder(),
 		optedInServicesCache:     make(map[string][]*cachedService),
-		maxCacheSizePerNamespace: 1000, // Default: 1000 services per namespace (configurable via env var in future)
+		maxCacheSizePerNamespace: maxCacheSizePerNamespace,
 	}
 }
 
@@ -318,17 +321,28 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Leader-fast-path - immediately failover if current leader is unhealthy
 	bypassStickiness := false
+	var failoverStartTime time.Time
+	var failoverReason string
 	if currentLeaderPod != nil {
 		// Check if current leader is terminating, not Ready, or has no PodIP
 		if currentLeaderPod.DeletionTimestamp != nil ||
 			!isPodReady(currentLeaderPod) ||
 			currentLeaderPod.Status.PodIP == "" {
+			failoverStartTime = time.Now() // Track failover start time
 			logger.Info("Current leader unhealthy, triggering immediate failover",
 				sdklog.Operation("failover"),
 				sdklog.String("leader", currentLeaderPod.Name),
 				sdklog.Bool("terminating", currentLeaderPod.DeletionTimestamp != nil),
 				sdklog.Bool("ready", isPodReady(currentLeaderPod)),
 				sdklog.Bool("hasIP", currentLeaderPod.Status.PodIP != ""))
+			// Determine failover reason
+			if currentLeaderPod.DeletionTimestamp != nil {
+				failoverReason = "terminating"
+			} else if !isPodReady(currentLeaderPod) {
+				failoverReason = "notReady"
+			} else if currentLeaderPod.Status.PodIP == "" {
+				failoverReason = "noIP"
+			}
 			// Force new leader selection (bypass stickiness)
 			bypassStickiness = true
 			currentLeaderPod = nil
@@ -379,8 +393,16 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 				} else if currentLeaderPod.Status.PodIP == "" {
 					reason = "noIP"
 				}
+			} else if failoverReason != "" {
+				// Use the reason we determined earlier when leader was unhealthy
+				reason = failoverReason
 			}
 			r.Metrics.RecordFailover(svc.Namespace, svc.Name, reason)
+			// Record failover latency if we tracked the start time
+			if !failoverStartTime.IsZero() {
+				latency := time.Since(failoverStartTime).Seconds()
+				r.Metrics.RecordFailoverLatency(svc.Namespace, svc.Name, reason, latency)
+			}
 			// Reset leader duration (no pod label - leader identity in annotations)
 			r.Metrics.ResetLeaderDuration(svc.Namespace, svc.Name)
 		}
