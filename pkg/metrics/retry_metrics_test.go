@@ -77,4 +77,3 @@ func TestRecordRetryAttemptEdgeCases(t *testing.T) {
 
 	// Should not panic
 }
-

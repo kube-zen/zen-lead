@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kube-zen/zen-sdk/pkg/retry"
 	"github.com/kube-zen/zen-lead/pkg/metrics"
+	"github.com/kube-zen/zen-sdk/pkg/retry"
 )
 
 // retryDoWithMetrics wraps retry.Do to record retry attempt metrics.
@@ -83,4 +83,3 @@ func retryDoWithMetrics(ctx context.Context, cfg retry.Config, fn func() error, 
 
 	return err
 }
-

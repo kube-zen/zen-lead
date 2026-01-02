@@ -76,8 +76,8 @@ func main() {
 		setupLog.Info("OpenTelemetry tracing initialized")
 		defer func() {
 			if shutdownTracing != nil {
-				if err := shutdownTracing(ctx); err != nil {
-					setupLog.Error(err, "Failed to shutdown tracing", sdklog.ErrorCode("TRACING_SHUTDOWN_ERROR"))
+				if shutdownErr := shutdownTracing(ctx); shutdownErr != nil {
+					setupLog.Error(shutdownErr, "Failed to shutdown tracing", sdklog.ErrorCode("TRACING_SHUTDOWN_ERROR"))
 				}
 			}
 		}()
@@ -87,7 +87,9 @@ func main() {
 	leaderElectionNS, err := leader.RequirePodNamespace()
 	if err != nil {
 		setupLog.Error(err, "failed to determine pod namespace for leader election", sdklog.ErrorCode("LEADER_ELECTION_ERROR"))
-		os.Exit(1)
+		// Note: defer functions will run before os.Exit in Go, but this is a fatal error
+		// so we exit immediately. Tracing shutdown (if initialized) will still run.
+		os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional - fatal error, defer will run
 	}
 
 	// Set REST config QPS/Burst defaults (via zen-sdk helper)

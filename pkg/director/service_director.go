@@ -168,7 +168,7 @@ type ServiceDirectorReconciler struct {
 	// Protected by cacheMu for concurrent access
 	cacheMu              sync.RWMutex
 	optedInServicesCache map[string][]*cachedService
-	
+
 	// maxCacheSizePerNamespace limits the number of cached services per namespace (0 = unlimited)
 	maxCacheSizePerNamespace int
 }
@@ -183,19 +183,19 @@ type cachedService struct {
 // NewServiceDirectorReconciler creates a new ServiceDirectorReconciler
 func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder) *ServiceDirectorReconciler {
 	return &ServiceDirectorReconciler{
-		Client:                    client,
-		Scheme:                    scheme,
-		Recorder:                  recorder,
-		Metrics:                   metrics.NewRecorder(),
-		optedInServicesCache:      make(map[string][]*cachedService),
-		maxCacheSizePerNamespace:  1000, // Default: 1000 services per namespace (configurable via env var in future)
+		Client:                   client,
+		Scheme:                   scheme,
+		Recorder:                 recorder,
+		Metrics:                  metrics.NewRecorder(),
+		optedInServicesCache:     make(map[string][]*cachedService),
+		maxCacheSizePerNamespace: 1000, // Default: 1000 services per namespace (configurable via env var in future)
 	}
 }
 
 // Reconcile reconciles a Service with zen-lead.io/enabled annotation
 func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	startTime := time.Now()
-	
+
 	// Create tracing span for reconciliation
 	tracer := observability.GetTracer("zen-lead-service-director")
 	ctx, span := tracer.Start(ctx, "reconcile",
@@ -204,7 +204,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			attribute.String("service", req.Name),
 		))
 	defer span.End()
-	
+
 	// Use package-level logger to avoid allocation (pattern from zen-sdk)
 	logger := packageLogger.WithContext(ctx).WithFields(map[string]interface{}{
 		"namespace": req.Namespace,
@@ -580,7 +580,7 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 			attribute.String("service", svc.Name),
 		))
 	defer span.End()
-	
+
 	leaderServiceName := r.getLeaderServiceName(svc)
 
 	// Create or update selector-less leader Service
@@ -852,7 +852,7 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 			attribute.String("service", svc.Name),
 		))
 	defer span.End()
-	
+
 	endpointSliceName := leaderServiceName
 	endpointSlice := &discoveryv1.EndpointSlice{}
 	endpointSliceKey := types.NamespacedName{
@@ -1438,7 +1438,7 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCacheLocked(ctx context
 			lastAccess: now, // Initialize access time
 		})
 	}
-	
+
 	// Apply cache size limit (LRU eviction: keep most recently accessed)
 	if r.maxCacheSizePerNamespace > 0 && len(cached) > r.maxCacheSizePerNamespace {
 		// Sort by last access time (most recent first), then keep first N
@@ -1452,7 +1452,7 @@ func (r *ServiceDirectorReconciler) updateOptedInServicesCacheLocked(ctx context
 			sdklog.Int("limit", r.maxCacheSizePerNamespace),
 			sdklog.Int("cached", len(cached)))
 	}
-	
+
 	// Initialize map if nil (defensive programming)
 	if r.optedInServicesCache == nil {
 		r.optedInServicesCache = make(map[string][]*cachedService)
