@@ -1170,7 +1170,7 @@ func TestNewServiceDirectorReconciler(t *testing.T) {
 		Build()
 	eventRecorder := record.NewFakeRecorder(10)
 
-		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000)
+		r := NewServiceDirectorReconciler(fakeClient, scheme, eventRecorder, 1000, 10)
 
 	if r == nil {
 		t.Fatal("NewServiceDirectorReconciler() returned nil")

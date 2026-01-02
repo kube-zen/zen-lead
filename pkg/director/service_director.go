@@ -171,6 +171,9 @@ type ServiceDirectorReconciler struct {
 
 	// maxCacheSizePerNamespace limits the number of cached services per namespace (0 = unlimited)
 	maxCacheSizePerNamespace int
+
+	// maxConcurrentReconciles limits the number of concurrent reconciliations (0 = unlimited)
+	maxConcurrentReconciles int
 }
 
 // cachedService holds a Service's selector for efficient matching
@@ -181,9 +184,12 @@ type cachedService struct {
 }
 
 // NewServiceDirectorReconciler creates a new ServiceDirectorReconciler
-func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, maxCacheSizePerNamespace int) *ServiceDirectorReconciler {
+func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, recorder record.EventRecorder, maxCacheSizePerNamespace, maxConcurrentReconciles int) *ServiceDirectorReconciler {
 	if maxCacheSizePerNamespace <= 0 {
 		maxCacheSizePerNamespace = 1000 // Default: 1000 services per namespace
+	}
+	if maxConcurrentReconciles <= 0 {
+		maxConcurrentReconciles = 10 // Default: 10 concurrent reconciles
 	}
 	return &ServiceDirectorReconciler{
 		Client:                   client,
@@ -192,6 +198,7 @@ func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, 
 		Metrics:                  metrics.NewRecorder(),
 		optedInServicesCache:     make(map[string][]*cachedService),
 		maxCacheSizePerNamespace: maxCacheSizePerNamespace,
+		maxConcurrentReconciles:  maxConcurrentReconciles,
 	}
 }
 

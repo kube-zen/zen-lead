@@ -64,6 +64,10 @@ func main() {
 	flag.IntVar(&maxCacheSizePerNamespace, "max-cache-size-per-namespace", 1000,
 		"Maximum number of cached services per namespace (0 = unlimited). Default: 1000.")
 
+	var maxConcurrentReconciles int
+	flag.IntVar(&maxConcurrentReconciles, "max-concurrent-reconciles", 10,
+		"Maximum number of concurrent reconciles. Default: 10.")
+
 	flag.Parse()
 
 	// Initialize zen-sdk logger (configures controller-runtime logger automatically)
@@ -122,7 +126,7 @@ func main() {
 	// Non-invasive Service-based approach: watches Services with zen-lead.io/enabled annotation
 	// This is Profile A (network-only, CRD-free) - always enabled
 	eventRecorder := mgr.GetEventRecorderFor("zen-lead-controller")
-	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder, maxCacheSizePerNamespace)
+	reconciler := director.NewServiceDirectorReconciler(mgr.GetClient(), mgr.GetScheme(), eventRecorder, maxCacheSizePerNamespace, maxConcurrentReconciles)
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", sdklog.Component("ServiceDirector"), sdklog.ErrorCode("CONTROLLER_SETUP_ERROR"))
 		os.Exit(1)
