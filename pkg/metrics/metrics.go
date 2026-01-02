@@ -453,6 +453,11 @@ func (r *Recorder) FailoverCountTotal() *prometheus.CounterVec {
 	return r.failoverCountTotal
 }
 
+// FailoverLatencySeconds returns the failover latency histogram vector (for testing)
+func (r *Recorder) FailoverLatencySeconds() *prometheus.HistogramVec {
+	return r.failoverLatencySeconds
+}
+
 // PortResolutionFailuresTotal returns the port resolution failures counter vector (for testing)
 func (r *Recorder) PortResolutionFailuresTotal() *prometheus.CounterVec {
 	return r.portResolutionFailuresTotal

@@ -5,6 +5,29 @@ All notable changes to zen-lead will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+**Configuration:**
+- `--max-cache-size-per-namespace` flag to configure in-memory cache size limit per namespace (default: 1000)
+- Helm chart support for `controller.maxCacheSizePerNamespace` with comprehensive documentation
+
+**Observability:**
+- `zen_lead_failover_latency_seconds` histogram metric tracking time from leader unhealthy detection to new leader selected
+- Custom health check endpoint (`ControllerHealthChecker`) that verifies controller initialization
+- Enhanced readiness probe that checks controller can reconcile Services
+
+**Documentation:**
+- Comprehensive improvement suggestions document (`docs/IMPROVEMENT_SUGGESTIONS.md`)
+- Cache tuning guidance in Helm chart values.yaml
+- Cache size configuration examples in Helm chart README
+
+### Changed
+
+- `NewServiceDirectorReconciler` now accepts `maxCacheSizePerNamespace` parameter for configurable cache limits
+- Health check endpoint now validates reconciler initialization (Client, Metrics, etc.)
+
 ## [0.1.0-alpha] - 2025-12-30
 
 ### 🎉 Initial Alpha Release
