@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -76,8 +77,8 @@ func main() {
 	flag.IntVar(&metricsCollectionTimeoutSeconds, "metrics-collection-timeout-seconds", 5,
 		"Timeout in seconds for metrics collection operations. Default: 5.")
 
-	var qps float32
-	flag.Float32Var(&qps, "qps", 50,
+	var qps float64
+	flag.Float64Var(&qps, "qps", 50,
 		"QPS (queries per second) for Kubernetes API client. Default: 50.")
 
 	var burst int
@@ -119,7 +120,7 @@ func main() {
 	// Set REST config QPS/Burst (use provided values or zen-sdk defaults)
 	restConfig := ctrl.GetConfigOrDie()
 	if qps > 0 {
-		restConfig.QPS = qps
+		restConfig.QPS = float32(qps)
 	}
 	if burst > 0 {
 		restConfig.Burst = burst
