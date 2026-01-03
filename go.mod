@@ -81,8 +81,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-// Temporary replace directive: zen-sdk v0.2.8-alpha doesn't include pkg/k8s/metadata
-// Once zen-sdk v0.2.9-alpha (or later) is released with metadata package, remove this replace
-// and update the require to use the published version
-replace github.com/kube-zen/zen-sdk => ../zen-sdk

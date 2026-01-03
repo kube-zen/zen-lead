@@ -7,28 +7,10 @@ RUN addgroup -g 65532 -S nonroot && \
 
 WORKDIR /workspace
 
-# Copy zen-sdk first (needed for latest logging code)
-# Build context should be from parent directory (zen/)
-COPY zen-sdk /workspace/zen-sdk
-
-# Ensure zen-sdk dependencies are resolved
-WORKDIR /workspace/zen-sdk
-RUN go mod tidy && go mod download
-
-# Back to workspace
-WORKDIR /workspace
-
 # Copy go mod files
 COPY zen-lead/go.mod zen-lead/go.sum* ./
 
-# Download dependencies (may fail for zen-sdk if tag not available, that's OK)
-RUN go mod download || true
-
-# Temporary: Add replace directive to use local zen-sdk (metadata package not yet published)
-# TODO: Remove this once zen-sdk v0.2.9-alpha (or later) is released with pkg/k8s/metadata
-RUN go mod edit -replace github.com/kube-zen/zen-sdk=./zen-sdk
-
-# Download dependencies with local replace (updates go.sum without removing requires)
+# Download dependencies
 RUN go mod download
 
 # Copy source code

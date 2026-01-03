@@ -45,7 +45,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/kube-zen/zen-lead/pkg/metrics"
-	sdkmetadata "github.com/kube-zen/zen-sdk/pkg/k8s/metadata"
 	sdklog "github.com/kube-zen/zen-sdk/pkg/logging"
 	"github.com/kube-zen/zen-sdk/pkg/observability"
 	"github.com/kube-zen/zen-sdk/pkg/retry"
@@ -103,9 +102,8 @@ const (
 	LabelEndpointSliceManagedByValue = "zen-lead"
 )
 
-// Note: GitOps label/annotation filtering is now provided by zen-sdk/pkg/k8s/metadata
-// The functions filterGitOpsLabels and filterGitOpsAnnotations have been removed
-// and replaced with sdkmetadata.FilterGitOpsLabels and sdkmetadata.FilterGitOpsAnnotations
+// Note: GitOps label/annotation filtering is implemented locally in metadata.go
+// TODO: Once zen-sdk v0.2.9-alpha (or later) includes pkg/k8s/metadata, switch to using that
 
 // ServiceDirectorReconciler reconciles Services with zen-lead.io/enabled annotation
 // to route traffic to leader pods via selector-less Service + EndpointSlice.
@@ -825,12 +823,12 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 		}
 		// Service doesn't exist, create it
 		// Filter GitOps labels/annotations to prevent ownership conflicts
-		leaderLabels := sdkmetadata.FilterGitOpsLabels(svc.Labels)
+		leaderLabels := filterGitOpsLabels(svc.Labels)
 		leaderLabels[LabelManagedBy] = LabelManagedByValue
 		leaderLabels[LabelSourceService] = svc.Name
 
 		// Build annotations for leader Service (add leader tracking annotations)
-		leaderAnnotations := sdkmetadata.FilterGitOpsAnnotations(svc.Annotations)
+		leaderAnnotations := filterGitOpsAnnotations(svc.Annotations)
 		if leaderPod != nil {
 			leaderAnnotations["zen-lead.io/current-leader"] = leaderPod.Name
 			leaderAnnotations[AnnotationLeaderPodName] = leaderPod.Name
@@ -1139,7 +1137,7 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 		}
 		// EndpointSlice doesn't exist, create it
 		// Filter GitOps labels to prevent ownership conflicts
-		endpointSliceLabels := sdkmetadata.FilterGitOpsLabels(svc.Labels)
+		endpointSliceLabels := filterGitOpsLabels(svc.Labels)
 		endpointSliceLabels[discoveryv1.LabelServiceName] = leaderServiceName
 		endpointSliceLabels[LabelManagedBy] = LabelManagedByValue
 		endpointSliceLabels[LabelSourceService] = svc.Name
