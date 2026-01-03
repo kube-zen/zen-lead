@@ -3,7 +3,7 @@ module github.com/kube-zen/zen-lead
 go 1.25.0
 
 require (
-	github.com/kube-zen/zen-sdk v0.2.7-alpha
+	github.com/kube-zen/zen-sdk v0.2.8-alpha
 	github.com/prometheus/client_golang v1.23.2
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/trace v1.39.0
@@ -82,4 +82,7 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
+// Temporary replace directive: zen-sdk v0.2.8-alpha doesn't include pkg/k8s/metadata
+// Once zen-sdk v0.2.9-alpha (or later) is released with metadata package, remove this replace
+// and update the require to use the published version
 replace github.com/kube-zen/zen-sdk => ../zen-sdk

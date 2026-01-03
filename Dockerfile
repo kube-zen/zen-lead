@@ -24,7 +24,8 @@ COPY zen-lead/go.mod zen-lead/go.sum* ./
 # Download dependencies (may fail for zen-sdk if tag not available, that's OK)
 RUN go mod download || true
 
-# Add replace directive to use local zen-sdk during build
+# Temporary: Add replace directive to use local zen-sdk (metadata package not yet published)
+# TODO: Remove this once zen-sdk v0.2.9-alpha (or later) is released with pkg/k8s/metadata
 RUN go mod edit -replace github.com/kube-zen/zen-sdk=./zen-sdk
 
 # Download dependencies with local replace (updates go.sum without removing requires)
