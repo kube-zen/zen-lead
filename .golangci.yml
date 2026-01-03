@@ -4,7 +4,8 @@
 run:
   timeout: 5m
   tests: true
-  go: "1.25"
+  # Go version auto-detected from go.mod
+  # Explicit version removed to avoid compatibility issues with golangci-lint binary versions
 
 linters:
   enable:

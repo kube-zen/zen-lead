@@ -202,7 +202,11 @@ controller:
   enableParallelAPICalls: true      # Enable parallelization (default: true)
 ```
 
-See [Performance Tuning Guide](docs/PERFORMANCE_TUNING.md) for detailed configuration options and expected performance.
+**Experimental Go 1.25 Features:** **GA-only is default** (no experimental features). Experimental features (JSON v2, Green Tea GC) are opt-in and provide **15-25% performance improvement with no stability regressions**. 
+
+To use experimental features, build with `make docker-build-experimental` or `docker build --build-arg GOEXPERIMENT=jsonv2,greenteagc`, then deploy with `--set image.variant=experimental`.
+
+See [Performance Tuning Guide](docs/PERFORMANCE_TUNING.md) and [Experimental Features Guide](docs/EXPERIMENTAL_FEATURES.md) for details.
 
 ### Verify Installation
 

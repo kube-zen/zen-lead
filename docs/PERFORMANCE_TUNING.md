@@ -3,13 +3,9 @@
 **Date**: 2026-01-02  
 **Version**: 0.1.0
 
----
-
 ## Overview
 
 This guide provides recommendations for tuning zen-lead performance in production environments, especially for large-scale deployments.
-
----
 
 ## Cache Configuration
 
@@ -39,7 +35,40 @@ Or via command-line flag:
 --max-cache-size-per-namespace=5000
 ```
 
----
+### Cache Hit Rate
+
+Target cache hit rate: **>80%**
+
+**Metrics:**
+- `zen_lead_cache_hits_total`: Successful cache lookups
+- `zen_lead_cache_misses_total`: Cache refreshes required
+
+**Calculation:**
+```
+hit_rate = cache_hits / (cache_hits + cache_misses)
+```
+
+**When Hit Rate is Low (<80%):**
+- Check if many namespaces are being accessed
+- Verify cache invalidation is working correctly
+- Consider increasing cache size limits
+
+### Memory Usage
+
+**Estimate:**
+- Per cached service: ~200 bytes (name + selector)
+- Per namespace: `num_services * 200 bytes`
+- Example: 1000 services = ~200 KB per namespace
+
+**Monitoring:**
+- Use `zen_lead_cache_size` metric
+- Monitor controller pod memory usage
+- Set appropriate memory limits in Deployment
+
+**Recommendations:**
+- **Small clusters** (<100 namespaces): Default limits are fine
+- **Large clusters** (>1000 namespaces): Consider cache size limits
+- **Very large clusters**: Monitor and tune based on metrics
 
 ## API Server Performance
 
@@ -59,12 +88,6 @@ zen-lead configures Kubernetes API client QPS/Burst settings:
 - **Decrease** if you see rate limiting errors (429) or API server overload
 - **Monitor**: Watch for `zen_lead_retry_attempts_total` spikes and `zen_lead_api_call_duration_seconds`
 
-**Configuration:**
-- Set via `leader.ApplyRestConfigDefaults()` in `cmd/manager/main.go`
-- Can be customized per deployment needs
-
----
-
 ## Reconciliation Performance
 
 ### Reconciliation Duration
@@ -79,51 +102,6 @@ Typical reconciliation takes:
 1. **Monitor** `zen_lead_reconciliation_duration_seconds` histogram
 2. **Alert** on P95 > 1 second
 3. **Investigate** slow reconciliations using tracing spans
-
----
-
-## Cache Performance
-
-### Cache Hit Rate
-
-Target cache hit rate: **>80%**
-
-**Metrics:**
-- `zen_lead_cache_hits_total`: Successful cache lookups
-- `zen_lead_cache_misses_total`: Cache refreshes required
-
-**Calculation:**
-```
-hit_rate = cache_hits / (cache_hits + cache_misses)
-```
-
-**When Hit Rate is Low (<80%):**
-- Check if many namespaces are being accessed
-- Verify cache invalidation is working correctly
-- Consider increasing cache size limits
-
----
-
-## Memory Usage
-
-### Cache Memory Footprint
-
-**Estimate:**
-- Per cached service: ~200 bytes (name + selector)
-- Per namespace: `num_services * 200 bytes`
-- Example: 1000 services = ~200 KB per namespace
-
-**Monitoring:**
-- Use `zen_lead_cache_size` metric
-- Monitor controller pod memory usage
-- Set appropriate memory limits in Deployment
-
-**Recommendations:**
-- **Small clusters** (<100 namespaces): Default limits are fine
-- **Large clusters** (>1000 namespaces): Consider cache size limits
-- **Very large clusters**: Monitor and tune based on metrics
-
----
 
 ## Failover Performance Optimizations
 
@@ -181,10 +159,6 @@ controller:
 - **Increase TTL** (30-60s) for stable deployments with rare pod changes
 - **Disable cache** if you need always-fresh pod state (may increase failover time)
 
-**Monitoring:**
-- Cache effectiveness is measured by failover latency reduction
-- No separate cache hit/miss metrics (cache is transparent to metrics)
-
 ### Parallel API Calls
 
 zen-lead includes infrastructure for parallelizing independent API operations.
@@ -199,123 +173,6 @@ controller:
 ```
 
 **Note:** Most operations remain sequential due to dependencies (e.g., Get Service before List Pods), but infrastructure is ready for future enhancements.
-
-## Retry Behavior
-
-### Standard Retry Configuration
-
-zen-lead uses `zen-sdk/pkg/retry` with default settings for non-critical operations:
-- **Max Attempts**: 3
-- **Initial Delay**: 100ms
-- **Max Delay**: 5s
-- **Multiplier**: 2.0 (exponential backoff)
-
-**Monitoring:**
-- `zen_lead_retry_attempts_total`: Track retry frequency
-- `zen_lead_retry_success_after_retry_total`: Success after retry
-
-**When Retries are High:**
-- Check API server health
-- Verify network connectivity
-- Review QPS/Burst settings
-- Check for rate limiting
-
----
-
-## Scaling Considerations
-
-### Controller Replicas
-
-**Default**: 2 replicas (for HA)
-
-**Scaling Guidelines:**
-- **Small clusters** (<100 Services): 2 replicas sufficient
-- **Medium clusters** (100-1000 Services): 2-3 replicas
-- **Large clusters** (>1000 Services): 3-5 replicas
-
-**Note**: More replicas don't necessarily improve performance (leader election ensures only one active reconciler)
-
----
-
-## Timeout Configuration
-
-### Context Timeouts
-
-zen-lead uses configurable context timeouts for long-running operations:
-- **Cache updates**: 10 seconds (default, configurable via `--cache-update-timeout-seconds` or Helm `controller.cacheUpdateTimeoutSeconds`)
-- **Metrics collection**: 5 seconds (default, configurable via `--metrics-collection-timeout-seconds` or Helm `controller.metricsCollectionTimeoutSeconds`)
-
-**Configuration:**
-- Via Helm chart: Set `controller.cacheUpdateTimeoutSeconds` and `controller.metricsCollectionTimeoutSeconds` in `values.yaml`
-- Via command-line flags: `--cache-update-timeout-seconds` and `--metrics-collection-timeout-seconds`
-
-**Monitoring:**
-- `zen_lead_timeout_occurrences_total`: Track timeout frequency
-- Alert on timeout spikes
-
-**When Timeouts Occur:**
-- Check API server responsiveness
-- Verify network latency
-- Increase timeout values if needed (especially for large clusters)
-
----
-
-## Best Practices
-
-### 1. Monitor Key Metrics
-
-**Essential Metrics:**
-- `zen_lead_reconciliation_duration_seconds` (P95, P99)
-- `zen_lead_cache_hits_total` / `zen_lead_cache_misses_total` (hit rate)
-- `zen_lead_retry_attempts_total` (retry frequency)
-- `zen_lead_timeout_occurrences_total` (timeout frequency)
-
-### 2. Set Appropriate Alerts
-
-**Recommended Alerts:**
-- P95 reconciliation duration > 1s
-- Cache hit rate < 80%
-- Retry rate > 10% of operations
-- Timeout occurrences > 0
-
-### 3. Tune Based on Workload
-
-**High Pod Churn:**
-- Monitor reconciliation frequency
-- Consider adjusting reconciliation intervals (future feature)
-
-**Many Services:**
-- Monitor cache size
-- Adjust cache limits if needed
-
-**API Server Issues:**
-- Monitor retry metrics
-- Adjust QPS/Burst if needed
-
----
-
-## Troubleshooting
-
-### Slow Reconciliations
-
-1. **Check metrics**: `zen_lead_reconciliation_duration_seconds`
-2. **Review tracing spans**: Use OpenTelemetry traces
-3. **Check API server**: Verify responsiveness
-4. **Review retry metrics**: High retries indicate API issues
-
-### High Memory Usage
-
-1. **Check cache size**: `zen_lead_cache_size`
-2. **Review cache limits**: Adjust if needed
-3. **Monitor per-namespace**: Identify large namespaces
-
-### Cache Misses
-
-1. **Check hit rate**: Calculate from metrics
-2. **Review cache invalidation**: Verify it's working
-3. **Check namespace access patterns**: Many namespaces = more misses
-
----
 
 ## Failover Performance
 
@@ -358,6 +215,60 @@ controller:
 
 **Note:** Aggressive settings may increase API server load. Monitor `zen_lead_retry_attempts_total` and API server metrics.
 
+## Retry Behavior
+
+### Standard Retry Configuration
+
+zen-lead uses `zen-sdk/pkg/retry` with default settings for non-critical operations:
+- **Max Attempts**: 3
+- **Initial Delay**: 100ms
+- **Max Delay**: 5s
+- **Multiplier**: 2.0 (exponential backoff)
+
+**Monitoring:**
+- `zen_lead_retry_attempts_total`: Track retry frequency
+- `zen_lead_retry_success_after_retry_total`: Success after retry
+
+**When Retries are High:**
+- Check API server health
+- Verify network connectivity
+- Review QPS/Burst settings
+- Check for rate limiting
+
+## Timeout Configuration
+
+### Context Timeouts
+
+zen-lead uses configurable context timeouts for long-running operations:
+- **Cache updates**: 10 seconds (default, configurable via `--cache-update-timeout-seconds` or Helm `controller.cacheUpdateTimeoutSeconds`)
+- **Metrics collection**: 5 seconds (default, configurable via `--metrics-collection-timeout-seconds` or Helm `controller.metricsCollectionTimeoutSeconds`)
+
+**Configuration:**
+- Via Helm chart: Set `controller.cacheUpdateTimeoutSeconds` and `controller.metricsCollectionTimeoutSeconds` in `values.yaml`
+- Via command-line flags: `--cache-update-timeout-seconds` and `--metrics-collection-timeout-seconds`
+
+**Monitoring:**
+- `zen_lead_timeout_occurrences_total`: Track timeout frequency
+- Alert on timeout spikes
+
+**When Timeouts Occur:**
+- Check API server responsiveness
+- Verify network latency
+- Increase timeout values if needed (especially for large clusters)
+
+## Scaling Considerations
+
+### Controller Replicas
+
+**Default**: 2 replicas (for HA)
+
+**Scaling Guidelines:**
+- **Small clusters** (<100 Services): 2 replicas sufficient
+- **Medium clusters** (100-1000 Services): 2-3 replicas
+- **Large clusters** (>1000 Services): 3-5 replicas
+
+**Note**: More replicas don't necessarily improve performance (leader election ensures only one active reconciler)
+
 ## Performance Benchmarks
 
 ### Typical Performance
@@ -380,10 +291,106 @@ controller:
 - Memory: <500 MB
 - Failover time: 1.1-1.5s (average)
 
----
+## Performance Comparison Template
 
----
+When comparing performance between different configurations (e.g., standard vs experimental features), use this template:
 
-**Last Updated**: 2026-01-02  
-**Next Review**: After production deployment
+### Test Configuration
 
+- **Date:** [YYYY-MM-DD]
+- **Test Duration:** [X hours/days]
+- **Test Environment:** [staging/production-like]
+- **Go Version:** 1.25.0
+- **zen-lead Version:** [version]
+
+### Metrics Comparison
+
+**Reconciliation Latency:**
+| Percentile | Standard (ms) | Experimental (ms) | Improvement |
+|------------|---------------|-------------------|-------------|
+| P50        | [value]       | [value]           | [X%]        |
+| P95        | [value]       | [value]           | [X%]        |
+| P99        | [value]       | [value]           | [X%]        |
+
+**Failover Latency:**
+| Percentile | Standard (ms) | Experimental (ms) | Improvement |
+|------------|---------------|-------------------|-------------|
+| P50        | [value]       | [value]           | [X%]        |
+| P95        | [value]       | [value]           | [X%]        |
+| P99        | [value]       | [value]           | [X%]        |
+
+**Resource Usage:**
+| Metric | Standard | Experimental | Difference |
+|--------|----------|---------------|------------|
+| CPU Usage (avg) | [X m] | [X m] | [+/-X%] |
+| Memory Usage (avg) | [X Mi] | [X Mi] | [+/-X%] |
+| GC Pause Time (avg) | [X ms] | [X ms] | [X%] |
+
+## Best Practices
+
+### 1. Monitor Key Metrics
+
+**Essential Metrics:**
+- `zen_lead_reconciliation_duration_seconds` (P95, P99)
+- `zen_lead_cache_hits_total` / `zen_lead_cache_misses_total` (hit rate)
+- `zen_lead_retry_attempts_total` (retry frequency)
+- `zen_lead_timeout_occurrences_total` (timeout frequency)
+- `zen_lead_failover_latency_seconds` (failover performance)
+
+### 2. Set Appropriate Alerts
+
+**Recommended Alerts:**
+- P95 reconciliation duration > 1s
+- Cache hit rate < 80%
+- Retry rate > 10% of operations
+- Timeout occurrences > 0
+- Failover latency P95 > 2s
+
+### 3. Tune Based on Workload
+
+**High Pod Churn:**
+- Monitor reconciliation frequency
+- Consider adjusting reconciliation intervals (future feature)
+
+**Many Services:**
+- Monitor cache size
+- Adjust cache limits if needed
+
+**API Server Issues:**
+- Monitor retry metrics
+- Adjust QPS/Burst if needed
+
+## Troubleshooting
+
+### Slow Reconciliations
+
+1. **Check metrics**: `zen_lead_reconciliation_duration_seconds`
+2. **Review tracing spans**: Use OpenTelemetry traces
+3. **Check API server**: Verify responsiveness
+4. **Review retry metrics**: High retries indicate API issues
+
+### High Memory Usage
+
+1. **Check cache size**: `zen_lead_cache_size`
+2. **Review cache limits**: Adjust if needed
+3. **Monitor per-namespace**: Identify large namespaces
+
+### Cache Misses
+
+1. **Check hit rate**: Calculate from metrics
+2. **Review cache invalidation**: Verify it's working
+3. **Check namespace access patterns**: Many namespaces = more misses
+
+### Slow Failovers
+
+1. **Check failover latency**: `zen_lead_failover_latency_seconds`
+2. **Review fast retry config**: Ensure it's enabled
+3. **Check leader pod cache**: Verify it's enabled
+4. **Monitor API server**: Check for latency issues
+
+## References
+
+- [Experimental Features](EXPERIMENTAL_FEATURES.md) - Performance improvements with experimental Go features
+- [Deployment Variant Selection](DEPLOYMENT_VARIANT_SELECTION.md) - Choosing image variants
+
+**Last Updated**: 2026-01-02

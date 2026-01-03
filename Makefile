@@ -124,18 +124,60 @@ run:
 	@echo "$(GREEN)Running controller locally...$(NC)"
 	go run ./cmd/manager/main.go
 
-## docker-build: Build Docker image
+## docker-build: Build both image variants (GA-only default, experimental optional)
 docker-build:
-	@echo "$(GREEN)Building Docker image...$(NC)"
+	@echo "$(GREEN)Building Docker images...$(NC)"
+	@echo "$(YELLOW)Building GA-only variant (default)...$(NC)"
 	docker build \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		--build-arg GOEXPERIMENT="" \
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		-t $(IMAGE_NAME):latest \
+		-t $(IMAGE_NAME):$(IMAGE_TAG)-ga-only \
 		-f Dockerfile \
 		.
-	@echo "$(GREEN)✅ Docker image built: $(IMAGE_NAME):$(IMAGE_TAG)$(NC)"
+	@echo "$(YELLOW)Building experimental variant (15-25% better performance)...$(NC)"
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		--build-arg GOEXPERIMENT=jsonv2,greenteagc \
+		-t $(IMAGE_NAME):$(IMAGE_TAG)-experimental \
+		-f Dockerfile \
+		.
+	@echo "$(GREEN)✅ Both image variants built:$(NC)"
+	@echo "   - $(IMAGE_NAME):$(IMAGE_TAG) (GA-only, default)"
+	@echo "   - $(IMAGE_NAME):$(IMAGE_TAG)-experimental (experimental, opt-in)"
+
+## docker-build-ga-only: Build only GA-only variant (default)
+docker-build-ga-only:
+	@echo "$(GREEN)Building GA-only Docker image...$(NC)"
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		--build-arg GOEXPERIMENT="" \
+		-t $(IMAGE_NAME):$(IMAGE_TAG) \
+		-t $(IMAGE_NAME):latest \
+		-t $(IMAGE_NAME):$(IMAGE_TAG)-ga-only \
+		-f Dockerfile \
+		.
+	@echo "$(GREEN)✅ GA-only image built: $(IMAGE_NAME):$(IMAGE_TAG)$(NC)"
+
+## docker-build-experimental: Build only experimental variant (opt-in)
+docker-build-experimental:
+	@echo "$(GREEN)Building experimental Docker image...$(NC)"
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		--build-arg GOEXPERIMENT=jsonv2,greenteagc \
+		-t $(IMAGE_NAME):$(IMAGE_TAG)-experimental \
+		-f Dockerfile \
+		.
+	@echo "$(GREEN)✅ Experimental image built: $(IMAGE_NAME):$(IMAGE_TAG)-experimental$(NC)"
 
 ## clean: Clean build artifacts
 clean:

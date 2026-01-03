@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Zen-Lead!
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Kubernetes cluster (k3d, kind, or minikube)
 - kubectl
 - Helm 3.0+ (for testing)

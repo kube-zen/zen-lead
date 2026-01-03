@@ -2,37 +2,37 @@
 
 ## Default Build Configuration
 
-**As of 2025-01-02:** Default images are built with experimental Go 1.25 features enabled (`GOEXPERIMENT=jsonv2,greenteagc`).
+**As of 2025-01-02:** Default images are GA-only (no experimental features). Experimental features are opt-in.
 
-**Rationale:** Integration tests show 15-25% performance improvement with no stability regressions.
+**Rationale:** GA-only is the safe default. Experimental features provide 15-25% performance improvement but are opt-in.
 
 ## Building Images
 
-### Default Build (With Experimental Features)
+### Default Build (GA-Only)
 
 ```bash
-# Standard build - includes experimental features by default
+# Standard build - GA-only (default)
 make docker-build
 
 # Or directly
 docker build -t kubezen/zen-lead:latest .
 ```
 
-**Result:** Image includes JSON v2 and Green Tea GC for better performance.
+**Result:** GA-only image (no experimental features).
 
-### Build Without Experimental Features (GA-Only)
+### Build With Experimental Features (Opt-In)
 
-If you need a GA-only build (without experimental features):
+To build with experimental features for better performance:
 
 ```bash
-# Build GA-only image
-make docker-build-no-experimental
+# Build experimental image
+make docker-build-experimental
 
 # Or directly
-docker build --build-arg GOEXPERIMENT="" -t kubezen/zen-lead:ga-only .
+docker build --build-arg GOEXPERIMENT=jsonv2,greenteagc -t kubezen/zen-lead:experimental .
 ```
 
-**Use Case:** Production environments with strict stability requirements.
+**Use Case:** Performance-critical deployments where you want to opt-in to 15-25% performance improvement.
 
 ## Helm Chart Configuration
 
@@ -107,8 +107,8 @@ Both variants are built by default with `make docker-build`:
 
 | Variant | Image Tag Pattern | GOEXPERIMENT | Performance | Stability | Use Case |
 |---------|-------------------|--------------|-------------|-----------|----------|
-| `experimental` (default) | `<tag>-experimental` or `latest` | `jsonv2,greenteagc` | ✅ 15-25% better | ✅ Stable | Recommended |
-| `ga-only` | `<tag>-ga-only` | (none) | Baseline | ✅ Stable | Conservative |
+| `ga-only` (default) | `<tag>-ga-only` or `latest` | (none) | Baseline | ✅ Stable | Recommended (default) |
+| `experimental` | `<tag>-experimental` | `jsonv2,greenteagc` | ✅ 15-25% better | ✅ Stable | Opt-in for performance |
 
 **Selection:** Choose via `image.variant` in Helm values at deployment time.
 
