@@ -105,18 +105,19 @@ uninstall:
 	kubectl delete -f config/crd/bases/ --ignore-not-found=true
 	@echo "$(GREEN)✅ CRDs uninstalled$(NC)"
 
-## deploy: Deploy controller
+## deploy: Deploy controller (using Helm)
 deploy:
-	@echo "$(GREEN)Deploying controller...$(NC)"
-	kubectl apply -f config/rbac/
-	kubectl apply -f deploy/
+	@echo "$(GREEN)Deploying controller using Helm...$(NC)"
+	@echo "$(YELLOW)Note: Deployment manifests are in helm-charts/charts/zen-lead/$(NC)"
+	helm install zen-lead ../helm-charts/charts/zen-lead \
+		--namespace zen-system \
+		--create-namespace
 	@echo "$(GREEN)✅ Controller deployed$(NC)"
 
 ## undeploy: Undeploy controller
 undeploy:
 	@echo "$(GREEN)Undeploying controller...$(NC)"
-	kubectl delete -f deploy/ --ignore-not-found=true
-	kubectl delete -f config/rbac/ --ignore-not-found=true
+	helm uninstall zen-lead --namespace zen-system || true
 	@echo "$(GREEN)✅ Controller undeployed$(NC)"
 
 ## run: Run controller locally

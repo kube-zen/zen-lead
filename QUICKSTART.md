@@ -15,11 +15,9 @@ Get zen-lead up and running in 5 minutes!
 helm install zen-lead zen-lead/zen-lead \
   --namespace default \
   --create-namespace
-
-# Or using kubectl
-kubectl apply -f config/rbac/
-kubectl apply -f deploy/
 ```
+
+**Note:** Deployment manifests are managed via Helm chart. For development/testing without Helm, see [Development Guide](docs/DEVELOPMENT.md).
 
 ## Step 2: Verify Installation
 

@@ -13,11 +13,9 @@ This guide explains how to integrate zen-lead with your Kubernetes workloads to 
 helm install zen-lead zen-lead/zen-lead \
   --namespace default \
   --create-namespace
-
-# Or using kubectl
-kubectl apply -f config/rbac/
-kubectl apply -f deploy/
 ```
+
+**Note:** Deployment manifests are managed via Helm chart in `helm-charts/charts/zen-lead/`.
 
 ### Step 2: Annotate Your Service
 

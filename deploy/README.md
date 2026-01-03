@@ -1,6 +1,8 @@
-# Zen-Lead Deployment Files
+# Zen-Lead Monitoring Configurations
 
-This directory contains deployment manifests and monitoring configurations for zen-lead.
+This directory contains monitoring and observability configurations for zen-lead.
+
+**Note:** Deployment manifests are in the Helm chart (`helm-charts/charts/zen-lead/`). Use Helm for deployments.
 
 ## Directory Structure
 
