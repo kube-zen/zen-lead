@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -613,25 +614,31 @@ func (r *ServiceDirectorReconciler) clearLeaderPodCache(serviceKey string) {
 }
 
 // cleanupLeaderPodCache periodically cleans up expired cache entries
-func (r *ServiceDirectorReconciler) cleanupLeaderPodCache(ttl time.Duration) {
+// Respects context cancellation for graceful shutdown
+func (r *ServiceDirectorReconciler) cleanupLeaderPodCache(ctx context.Context, ttl time.Duration) {
 	if r.leaderPodCache == nil {
 		return // Cache disabled
 	}
 	ticker := time.NewTicker(ttl / 2) // Clean up every half TTL
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if r.leaderPodCache == nil {
-			return // Cache disabled
-		}
-		now := time.Now()
-		r.leaderPodCacheMu.Lock()
-		for key, cached := range r.leaderPodCache {
-			if now.After(cached.expiresAt) {
-				delete(r.leaderPodCache, key)
+	for {
+		select {
+		case <-ctx.Done():
+			return // Context cancelled, stop cleanup
+		case <-ticker.C:
+			if r.leaderPodCache == nil {
+				return // Cache disabled
 			}
+			now := time.Now()
+			r.leaderPodCacheMu.Lock()
+			for key, cached := range r.leaderPodCache {
+				if now.After(cached.expiresAt) {
+					delete(r.leaderPodCache, key)
+				}
+			}
+			r.leaderPodCacheMu.Unlock()
 		}
-		r.leaderPodCacheMu.Unlock()
 	}
 }
 
@@ -1467,9 +1474,12 @@ func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	// Start cache cleanup goroutine if cache is enabled
-	// Use manager's context for proper lifecycle management (respects shutdown)
+	// Use manager's Add() to ensure proper lifecycle management (respects shutdown)
 	if r.leaderPodCache != nil && r.leaderPodCacheTTL > 0 {
-		go r.cleanupLeaderPodCache(mgr.GetContext(), r.leaderPodCacheTTL)
+		mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			r.cleanupLeaderPodCache(ctx, r.leaderPodCacheTTL)
+			return nil
+		}))
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
