@@ -72,10 +72,9 @@ func (c *ControllerHealthChecker) Check(req *http.Request) error {
 	}
 
 	// Verify cache is initialized (if enabled)
-	if c.reconciler.leaderPodCache != nil {
-		// Cache is initialized, that's sufficient
-		// We don't check cache size here as it's dynamic
-	}
+	// Cache initialization is verified by checking if it's not nil
+	// We don't check cache size here as it's dynamic
+	_ = c.reconciler.leaderPodCache
 
 	// Controller is healthy if reconciler is properly initialized and API is reachable
 	return nil

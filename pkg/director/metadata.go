@@ -27,7 +27,7 @@ var gitOpsTrackingLabels = map[string]struct{}{
 	"fluxcd.io/part-of":                     {},
 	"kustomize.toolkit.fluxcd.io/name":      {},
 	"kustomize.toolkit.fluxcd.io/namespace": {},
-	"kustomize.toolkit.fluxcd.io/revision": {},
+	"kustomize.toolkit.fluxcd.io/revision":  {},
 }
 
 // GitOpsTrackingAnnotations contains common GitOps tool annotations that should NOT be copied to generated resources
@@ -72,4 +72,3 @@ func filterGitOpsAnnotations(annotations map[string]string) map[string]string {
 	}
 	return filtered
 }
-

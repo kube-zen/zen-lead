@@ -1387,7 +1387,7 @@ func (r *ServiceDirectorReconciler) getLeaderServiceName(svc *corev1.Service) st
 		// Default: <service-name>-leader
 		leaderName = svc.Name + ServiceSuffixService
 	}
-	
+
 	// Validate resource name (RFC 1123 subdomain)
 	if errs := validation.IsDNS1123Subdomain(leaderName); len(errs) > 0 {
 		// Log warning but use sanitized name (replace invalid chars)
@@ -1407,7 +1407,7 @@ func (r *ServiceDirectorReconciler) getLeaderServiceName(svc *corev1.Service) st
 			leaderName = svc.Name
 		}
 	}
-	
+
 	return leaderName
 }
 
@@ -1474,10 +1474,12 @@ func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Start cache cleanup goroutine if cache is enabled
 	// Use manager's Add() to ensure proper lifecycle management (respects shutdown)
 	if r.leaderPodCache != nil && r.leaderPodCacheTTL > 0 {
-		mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 			r.cleanupLeaderPodCache(ctx, r.leaderPodCacheTTL)
 			return nil
-		}))
+		})); err != nil {
+			return fmt.Errorf("failed to add cache cleanup runnable: %w", err)
+		}
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).

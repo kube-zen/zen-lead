@@ -173,17 +173,17 @@ func (c *Client) IsLeaderWithNamespace(ctx context.Context, poolName, namespace 
 	if errs := validation.IsDNS1123Label(namespace); len(errs) > 0 {
 		return false, fmt.Errorf("invalid namespace format: %v", errs)
 	}
-	
+
 	// Validate poolName format (should be a valid DNS subdomain)
 	if errs := validation.IsDNS1123Subdomain(poolName); len(errs) > 0 {
 		return false, fmt.Errorf("invalid pool name format: %v", errs)
 	}
-	
+
 	// If pod name is not set, return error (don't assume leader in production)
 	if c.podName == "" {
 		return false, fmt.Errorf("pod name not set (POD_NAME or HOSTNAME environment variable required)")
 	}
-	
+
 	// Check cache first (using namespace-qualified key)
 	cacheKey := fmt.Sprintf("%s/%s", namespace, poolName)
 	c.cacheMu.RLock()
