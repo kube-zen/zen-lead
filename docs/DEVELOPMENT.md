@@ -104,11 +104,9 @@ golangci-lint run
 
 ## Local Development Overrides
 
-**Note**: Currently, `zen-lead` uses a `replace` directive for `zen-sdk` because `zen-sdk` has not yet been published to a public Go module repository. This is a temporary measure until `zen-sdk` is published with proper version tags.
+**Note**: `zen-lead` uses a `replace` directive for `zen-sdk` because `zen-sdk` is not yet published to a public Go module repository. Once `zen-sdk` is published, the `replace` directive will be removed and `zen-lead` will use a proper version reference (e.g., `github.com/kube-zen/zen-sdk v0.1.2-alpha`).
 
-Once `zen-sdk` is published, the `replace` directive will be removed and `zen-lead` will use a proper version reference (e.g., `github.com/kube-zen/zen-sdk v0.1.2-alpha`).
-
-For local development with other dependencies, you can use `go.work` (Go workspaces) or temporary `replace` directives in your local `go.mod`. **Do not commit `replace` directives for dependencies that are available in public repositories** - they make builds non-reproducible.
+For local development with other dependencies, you can use `go.work` (Go workspaces) or `replace` directives in your local `go.mod`. **Do not commit `replace` directives for dependencies that are available in public repositories** - they make builds non-reproducible.
 
 Example (local only, do not commit):
 ```bash
@@ -155,12 +153,12 @@ zen-lead uses Go 1.25 and benefits from several GA features:
 
 **Example:**
 ```go
-// Before (sequential)
+// Sequential approach
 for _, ns := range namespaces {
     r.updateOptedInServicesCache(ctx, ns, logger)
 }
 
-// After (parallel with WaitGroup.Go)
+// Parallel approach (using WaitGroup.Go)
 var wg sync.WaitGroup
 for _, ns := range namespaces {
     wg.Go(func() {

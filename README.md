@@ -3,7 +3,7 @@
 **Network-Level Single-Active Routing for Kubernetes - Zero Code Changes**
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev/)
 
 ## The Brutal Differentiation
 
@@ -334,7 +334,7 @@ kubectl logs -l app.kubernetes.io/name=zen-lead | grep -i reconcile
 - **Managed Resources Only**: Creates only two resources per opted-in Service:
   - Selector-less `<service-name>-leader` Service
   - Single-endpoint EndpointSlice with Pod targetRef
-- **Vanilla Kubernetes**: Works on any Kubernetes cluster (1.24+) with default kube-proxy (iptables mode).
+- **Vanilla Kubernetes**: Works on any Kubernetes cluster (1.25+) with default kube-proxy (iptables mode).
 - **Event-Driven**: Fast failover detection via Pod watch predicates (< 1 second controller-side).
 - **Secure Defaults**: Namespace-scoped RBAC, restricted security contexts, mandatory controller leader election.
 
@@ -432,7 +432,7 @@ Zen-Lead provides **network-level single-active routing**. It does NOT:
 
 ### Q: Can I customize leader selection strategy?
 
-**A:** Currently, zen-lead uses sticky + oldest Ready pod strategy. Future versions may support configurable strategies (newest, random, node-aware) via Service annotations.
+**A:** zen-lead uses sticky + earliest Ready pod strategy. Future versions may support configurable strategies (newest, random, node-aware) via Service annotations.
 
 ### Q: Does zen-lead work with headless Services?
 

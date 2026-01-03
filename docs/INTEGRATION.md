@@ -166,7 +166,7 @@ spec:
     app: my-app
 ```
 
-**Result:** Leader selection always chooses oldest Ready pod (no sticky behavior).
+**Result:** Leader selection always chooses earliest Ready pod (no sticky behavior).
 
 ### Named TargetPort
 
@@ -255,7 +255,7 @@ kubectl get endpointslice -l kubernetes.io/service-name=my-app-leader -o jsonpat
 kubectl get events --field-selector involvedObject.name=my-app --sort-by='.lastTimestamp'
 
 # Common events:
-# - LeaderServiceCreated: Leader service was created
+# - LeaderServiceCreated: Leader service creation event
 # - LeaderRoutingAvailable: Leader routing is available
 # - LeaderChanged: Leader pod changed
 # - PortResolutionFailed: Port resolution failed (fail-closed)
@@ -293,7 +293,7 @@ kubectl get events --field-selector involvedObject.name=my-app -w
 ### Migration Pattern 1: Environment Variable
 
 ```yaml
-# Before (wrong - uses all pods)
+# Incorrect - uses all pods
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -325,7 +325,7 @@ spec:
 ### Migration Pattern 2: ConfigMap
 
 ```yaml
-# Before (wrong)
+# Incorrect
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -346,7 +346,7 @@ data:
 
 ```yaml
 # Application code change
-# Before: my-app.default.svc.cluster.local
+# Without zen-lead: my-app.default.svc.cluster.local
 # After:  my-app-leader.default.svc.cluster.local
 ```
 

@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: zen-lead-controller-manager
+  namespace: zen-system
+  labels:
+    app: zen-lead
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: zen-lead
+

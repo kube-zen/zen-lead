@@ -1,7 +1,6 @@
 # Experimental Go 1.25 Features
 
-**Status:** Opt-in, GA-Only is Default  
-**Date:** 2025-01-02
+**Status:** Opt-in, GA-Only is Default
 
 ## Overview
 
@@ -271,7 +270,6 @@ go test -tags=integration -v ./test/integration/...
 
 ### Functional Test Results
 
-**Test Date:** 2026-01-02  
 **Version:** 0.1.0-alpha-optimized  
 **Number of Failovers:** 50
 
@@ -282,10 +280,10 @@ go test -tags=integration -v ./test/integration/...
 - **Max Failover Time:** 1.99s
 - **Average Failover Time:** 1.21s
 
-**Performance Improvements (with optimizations):**
-- **Max failover time:** 59% improvement (reduced from 4.86s to 1.99s)
-- **Average failover time:** 5.7% improvement (reduced from 1.28s to 1.21s)
-- **Consistency:** Much more consistent (smaller variance)
+**Performance Characteristics:**
+- **Max failover time:** 1.99s (with optimizations enabled)
+- **Average failover time:** 1.21s (with optimizations enabled)
+- **Consistency:** Low variance in failover times
 
 ## Recommendations by Environment
 

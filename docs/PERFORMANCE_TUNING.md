@@ -1,6 +1,5 @@
 # Performance Tuning Guide
 
-**Date**: 2026-01-02  
 **Version**: 0.1.0
 
 ## Overview
@@ -178,18 +177,16 @@ controller:
 
 ### Expected Failover Times
 
-Based on functional testing with 50 failovers (with optimizations enabled):
-
 **Typical Failover Performance:**
 - **Average failover time**: 1.0-1.3 seconds
 - **Min failover time**: 0.9-1.0 seconds
-- **Max failover time**: 1.5-2.0 seconds (down from 4-5s without optimizations)
+- **Max failover time**: 1.5-2.0 seconds
 - **Success rate**: 100% (all failovers complete successfully)
 
-**Performance Improvements (with optimizations enabled):**
-- **Average**: ~5-10% faster than without optimizations
-- **Max**: ~60% faster (reduced from 4-5s to 1.5-2s)
-- **Consistency**: Much more consistent (smaller variance)
+**Performance Characteristics:**
+- **Average**: Optimized for typical failover scenarios
+- **Max**: Bounded failover time with optimizations enabled
+- **Consistency**: Low variance in failover times
 
 **Factors Affecting Failover Time:**
 1. **Pod scheduling speed**: New pod must be scheduled and become Ready
@@ -297,7 +294,6 @@ When comparing performance between different configurations (e.g., standard vs e
 
 ### Test Configuration
 
-- **Date:** [YYYY-MM-DD]
 - **Test Duration:** [X hours/days]
 - **Test Environment:** [staging/production-like]
 - **Go Version:** 1.25.0
@@ -393,4 +389,3 @@ When comparing performance between different configurations (e.g., standard vs e
 - [Experimental Features](EXPERIMENTAL_FEATURES.md) - Performance improvements with experimental Go features
 - [Deployment Variant Selection](DEPLOYMENT_VARIANT_SELECTION.md) - Choosing image variants
 
-**Last Updated**: 2026-01-02

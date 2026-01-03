@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/kube-zen/zen-lead/pkg/metrics"
+	sdkmetadata "github.com/kube-zen/zen-sdk/pkg/k8s/metadata"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -865,7 +866,7 @@ func TestServiceDirectorReconciler_SelectLeaderPod(t *testing.T) {
 		expectNil        bool
 	}{
 		{
-			name: "select oldest ready pod",
+			name: "select earliest ready pod",
 			service: &corev1.Service{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "my-service",
@@ -913,7 +914,7 @@ func TestServiceDirectorReconciler_SelectLeaderPod(t *testing.T) {
 				},
 			},
 			bypassStickiness: true,
-			expectedPodName:  "pod-1", // Oldest
+			expectedPodName:  "pod-1", // Earliest
 			expectNil:        false,
 		},
 		{
@@ -1279,7 +1280,7 @@ func TestFilterGitOpsLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := filterGitOpsLabels(tt.labels)
+			result := sdkmetadata.FilterGitOpsLabels(tt.labels)
 			if len(result) != len(tt.expected) {
 				t.Errorf("filterGitOpsLabels() length = %d, expected %d", len(result), len(tt.expected))
 			}
@@ -2092,7 +2093,7 @@ func TestFilterGitOpsAnnotations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := filterGitOpsAnnotations(tt.annotations)
+			result := sdkmetadata.FilterGitOpsAnnotations(tt.annotations)
 			if len(result) != len(tt.expected) {
 				t.Errorf("filterGitOpsAnnotations() length = %d, expected %d", len(result), len(tt.expected))
 			}

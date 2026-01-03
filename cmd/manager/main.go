@@ -25,9 +25,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"github.com/prometheus/client_golang/prometheus"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	leadershipv1alpha1 "github.com/kube-zen/zen-lead/pkg/apis/leadership.kube-zen.io/v1alpha1"
 	"github.com/kube-zen/zen-lead/pkg/controller"
@@ -42,6 +44,11 @@ var (
 	scheme   = runtime.NewScheme()
 	logger   *sdklog.Logger
 	setupLog *sdklog.Logger
+
+	// Version information (set via ldflags during build)
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
 )
 
 func init() {
@@ -230,6 +237,23 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check", sdklog.ErrorCode("READY_CHECK_ERROR"))
 		os.Exit(1)
 	}
+
+	// Register build info metric (standard Prometheus pattern)
+	// This metric is available in /metrics endpoint
+	buildInfo := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "zen_lead_build_info",
+			Help: "Build information for zen-lead",
+		},
+		[]string{"version", "commit", "build_date"},
+	)
+	metrics.Registry.MustRegister(buildInfo)
+	buildInfo.WithLabelValues(Version, Commit, BuildDate).Set(1)
+
+	setupLog.Info("zen-lead version info",
+		sdklog.String("version", Version),
+		sdklog.String("commit", Commit),
+		sdklog.String("build_date", BuildDate))
 
 	setupLog.Info("starting manager", sdklog.Operation("start"))
 	if err := mgr.Start(ctx); err != nil {

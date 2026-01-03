@@ -108,7 +108,7 @@ kubectl annotate service postgres zen-lead.io/enabled=true
 **T+1sec**: zen-lead controller detects annotation
 1. Finds all pods matching Service selector (`app: postgres`)
 2. Filters for Ready pods
-3. Selects leader using sticky + oldest Ready heuristic
+3. Selects leader using sticky + earliest Ready heuristic
 4. Creates `postgres-leader` Service (selector-less)
 5. Creates EndpointSlice pointing to ONE pod (the leader)
 
@@ -134,12 +134,12 @@ postgres-leader-yyyyy     10.244.0.5:5432  # Leader only
 ### Application Update (One DNS Name Change)
 
 ```yaml
-# OLD: Application connects to all pods (round-robin)
+# Application connects to all pods (round-robin)
 env:
 - name: DATABASE_HOST
   value: postgres  # Connects to any of 3 pods
 
-# NEW: Application connects to leader only
+# Application connects to leader only
 env:
 - name: DATABASE_HOST
   value: postgres-leader  # Connects to current leader

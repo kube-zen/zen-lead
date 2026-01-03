@@ -1,6 +1,10 @@
 # Build stage
 FROM golang:1.25-alpine AS builder
 
+# Security: Run as non-root user in builder stage
+RUN addgroup -g 65532 -S nonroot && \
+    adduser -u 65532 -S nonroot -G nonroot
+
 WORKDIR /workspace
 
 # Copy zen-sdk first (needed for latest logging code)
@@ -27,9 +31,15 @@ RUN go mod edit -replace github.com/kube-zen/zen-sdk=./zen-sdk
 RUN go mod download
 
 # Copy source code
-    COPY zen-lead/cmd/ cmd/
-    COPY zen-lead/pkg/ pkg/
-    COPY zen-lead/Makefile Makefile
+COPY zen-lead/cmd/ cmd/
+COPY zen-lead/pkg/ pkg/
+COPY zen-lead/Makefile Makefile
+
+# Change ownership to non-root user
+RUN chown -R nonroot:nonroot /workspace
+
+# Switch to non-root user for build
+USER nonroot:nonroot
 
 # Build
 # Default: GA-only (no experimental features)
@@ -48,11 +58,12 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 # Final stage
 FROM gcr.io/distroless/static:nonroot
 
+# Security: Explicitly set user (distroless already uses nonroot, but explicit is better)
+USER 65532:65532
+
 WORKDIR /
 
-COPY --from=builder /workspace/zen-lead .
-
-USER 65532:65532
+COPY --from=builder --chown=65532:65532 /workspace/zen-lead .
 
 ENTRYPOINT ["/zen-lead"]
 

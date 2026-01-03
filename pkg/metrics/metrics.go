@@ -76,6 +76,18 @@ func NewRecorder() *Recorder {
 	// Create zen-sdk base recorder for standardized reconciliation metrics
 	sdkRecorder := sdkmetrics.NewRecorder("zen-lead")
 
+	// Register build info metric (standard Prometheus pattern)
+	// This is registered globally and will be available in /metrics endpoint
+	buildInfo := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "zen_lead_build_info",
+			Help: "Build information for zen-lead",
+		},
+		[]string{"version", "commit", "build_date"},
+	)
+	metrics.Registry.MustRegister(buildInfo)
+	// Note: Actual values are set via main.go using build flags
+
 	// Create zen-lead-specific metrics
 	recorder := &Recorder{
 		Recorder: sdkRecorder,

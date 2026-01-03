@@ -17,13 +17,22 @@ limitations under the License.
 package director
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
 	// ErrNotReady indicates the controller is not ready
 	ErrNotReady = errors.New("controller not ready")
+	// ErrAPIConnectionFailed indicates API server connectivity issue
+	ErrAPIConnectionFailed = errors.New("API server connection failed")
 )
 
 // ControllerHealthChecker provides health check functionality for the ServiceDirector controller
@@ -51,6 +60,24 @@ func (c *ControllerHealthChecker) Check(req *http.Request) error {
 	if c.reconciler.Metrics == nil {
 		return ErrNotReady
 	}
-	// Controller is healthy if reconciler is properly initialized
+
+	// Enhanced health check: verify API server connectivity
+	// Use a short timeout to avoid blocking the health check
+	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+	defer cancel()
+
+	// Test API connectivity by listing namespaces (lightweight operation)
+	nsList := &corev1.NamespaceList{}
+	if err := c.reconciler.Client.List(ctx, nsList, client.Limit(1)); err != nil {
+		return fmt.Errorf("%w: %v", ErrAPIConnectionFailed, err)
+	}
+
+	// Verify cache is initialized (if enabled)
+	if c.reconciler.leaderPodCache != nil {
+		// Cache is initialized, that's sufficient
+		// We don't check cache size here as it's dynamic
+	}
+
+	// Controller is healthy if reconciler is properly initialized and API is reachable
 	return nil
 }

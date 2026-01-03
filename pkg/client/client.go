@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package client provides an optional client SDK for checking leader status.
-// NOTE: This client uses Leases and pool names, which are legacy features.
+// NOTE: This client uses Leases and pool names for leader election.
 // The primary zen-lead functionality uses Service-annotation opt-in and
 // network-level routing, which does not require this client SDK.
 package client
@@ -24,11 +24,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -78,10 +80,11 @@ func NewClient(k8sClient client.Client) (*Client, error) {
 //   - false if this pod is not the leader
 //   - error if there's an issue checking (e.g., zen-lead not installed)
 //
-// Fail-safe behavior:
-//   - If zen-lead is not installed (Lease doesn't exist), returns true (safe default)
-//   - If pod name cannot be determined, returns true (safe default for local dev)
-//   - If there's an API error, returns false (conservative default)
+// Error handling:
+//   - If zen-lead is not installed (Lease doesn't exist), returns error
+//   - If pod name cannot be determined, returns error
+//   - If namespace cannot be determined, returns error
+//   - All errors should be handled explicitly by the caller
 func (c *Client) IsLeader(ctx context.Context, poolName string) (bool, error) {
 	// Check cache first
 	c.cacheMu.RLock()
@@ -92,20 +95,37 @@ func (c *Client) IsLeader(ctx context.Context, poolName string) (bool, error) {
 	}
 	c.cacheMu.RUnlock()
 
-	// If pod name is not set (local dev), assume leader
+	// If pod name is not set, return error (don't assume leader in production)
 	if c.podName == "" {
-		return true, nil
+		return false, fmt.Errorf("pod name not set (POD_NAME or HOSTNAME environment variable required)")
 	}
 
 	// Get namespace
 	namespace := os.Getenv("POD_NAMESPACE")
 	if namespace == "" {
 		// Try to read from service account namespace file
-		if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-			namespace = string(data)
+		const maxNamespaceFileSize = 256 // Namespace names are typically < 100 bytes
+		data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+		if err == nil {
+			// Validate file size to prevent resource exhaustion
+			if len(data) > maxNamespaceFileSize {
+				return false, fmt.Errorf("namespace file too large: %d bytes (max: %d)", len(data), maxNamespaceFileSize)
+			}
+			namespace = strings.TrimSpace(string(data))
+			// Validate namespace format (RFC 1123 label)
+			if errs := validation.IsDNS1123Label(namespace); len(errs) > 0 {
+				return false, fmt.Errorf("invalid namespace format: %v", errs)
+			}
 		} else {
-			// Can't determine namespace, assume leader (local dev)
-			return true, nil
+			// Can't determine namespace - return error instead of assuming leader
+			// This prevents split-brain scenarios in production
+			return false, fmt.Errorf("cannot determine namespace: %w", err)
+		}
+	} else {
+		// Validate namespace from environment variable
+		namespace = strings.TrimSpace(namespace)
+		if errs := validation.IsDNS1123Label(namespace); len(errs) > 0 {
+			return false, fmt.Errorf("invalid namespace format from POD_NAMESPACE: %v", errs)
 		}
 	}
 
@@ -118,8 +138,8 @@ func (c *Client) IsLeader(ctx context.Context, poolName string) (bool, error) {
 
 	if err := c.k8sClient.Get(ctx, leaseKey, lease); err != nil {
 		// Lease doesn't exist - zen-lead might not be installed
-		// Fail-safe: assume leader (allows app to work without zen-lead)
-		return true, nil
+		// Return error instead of assuming leader to prevent split-brain scenarios
+		return false, fmt.Errorf("lease not found for pool %s in namespace %s (zen-lead may not be installed): %w", poolName, namespace, err)
 	}
 
 	// Check if this pod is the leader
@@ -148,6 +168,22 @@ func (c *Client) IsLeader(ctx context.Context, poolName string) (bool, error) {
 // IsLeaderWithNamespace checks if the current pod is the leader for the given pool in a specific namespace
 // This variant allows specifying the namespace explicitly
 func (c *Client) IsLeaderWithNamespace(ctx context.Context, poolName, namespace string) (bool, error) {
+	// Validate namespace format
+	namespace = strings.TrimSpace(namespace)
+	if errs := validation.IsDNS1123Label(namespace); len(errs) > 0 {
+		return false, fmt.Errorf("invalid namespace format: %v", errs)
+	}
+	
+	// Validate poolName format (should be a valid DNS subdomain)
+	if errs := validation.IsDNS1123Subdomain(poolName); len(errs) > 0 {
+		return false, fmt.Errorf("invalid pool name format: %v", errs)
+	}
+	
+	// If pod name is not set, return error (don't assume leader in production)
+	if c.podName == "" {
+		return false, fmt.Errorf("pod name not set (POD_NAME or HOSTNAME environment variable required)")
+	}
+	
 	// Check cache first (using namespace-qualified key)
 	cacheKey := fmt.Sprintf("%s/%s", namespace, poolName)
 	c.cacheMu.RLock()
@@ -158,11 +194,6 @@ func (c *Client) IsLeaderWithNamespace(ctx context.Context, poolName, namespace 
 	}
 	c.cacheMu.RUnlock()
 
-	// If pod name is not set (local dev), assume leader
-	if c.podName == "" {
-		return true, nil
-	}
-
 	// Get the Lease resource for this pool
 	lease := &coordinationv1.Lease{}
 	leaseKey := types.NamespacedName{
@@ -172,8 +203,8 @@ func (c *Client) IsLeaderWithNamespace(ctx context.Context, poolName, namespace 
 
 	if err := c.k8sClient.Get(ctx, leaseKey, lease); err != nil {
 		// Lease doesn't exist - zen-lead might not be installed
-		// Fail-safe: assume leader (allows app to work without zen-lead)
-		return true, nil
+		// Return error instead of assuming leader to prevent split-brain scenarios
+		return false, fmt.Errorf("lease not found for pool %s in namespace %s (zen-lead may not be installed): %w", poolName, namespace, err)
 	}
 
 	// Check if this pod is the leader

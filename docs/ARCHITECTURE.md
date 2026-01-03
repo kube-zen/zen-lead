@@ -39,7 +39,7 @@ Zen-lead creates and manages a single EndpointSlice for `S-leader`:
 **Algorithm (deterministic + low churn):**
 
 1. **Sticky Leader (default):** If current leader (from EndpointSlice targetRef) is still Ready → keep it
-2. **Fallback:** Choose oldest Ready pod (tie-breaker: lexical pod name)
+2. **Fallback:** Choose earliest Ready pod (tie-breaker: lexical pod name)
 3. **No Candidates:** If zero Ready pods → EndpointSlice endpoints empty (clean failure mode)
 
 **Candidates:** Pods matching `S.spec.selector` in the same namespace
@@ -54,7 +54,7 @@ Zen-lead creates and manages a single EndpointSlice for `S-leader`:
    └─> Lists pods in same namespace with matching labels
 
 3. Controller selects leader pod
-   └─> Sticky: keep current if Ready, else oldest Ready pod
+   └─> Sticky: keep current if Ready, else earliest Ready pod
 
 4. Controller creates/updates selector-less leader Service
    └─> Mirrors ports from source Service
@@ -83,7 +83,7 @@ Zen-lead creates and manages a single EndpointSlice for `S-leader`:
 2. Check for `zen-lead.io/enabled: "true"` annotation
 3. Validate Service has selector
 4. List pods matching selector
-5. Select leader pod (sticky + oldest Ready)
+5. Select leader pod (sticky + earliest Ready)
 6. Resolve Service ports (handle named targetPort)
 7. Reconcile leader Service (create/update)
 8. Reconcile EndpointSlice (create/update)
@@ -128,8 +128,8 @@ ports:
 - Reduces churn and unnecessary failovers
 - Disabled via `zen-lead.io/sticky: "false"`
 
-**Oldest Ready Pod:**
-- Selects pod with oldest `creationTimestamp`
+**Earliest Ready Pod Selection:**
+- Selects pod with earliest `creationTimestamp`
 - Tie-breaker: lexical pod name
 - Ensures deterministic selection
 

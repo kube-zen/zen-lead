@@ -136,7 +136,7 @@ spec:
 # Step 2: Update application to use leader Service
 env:
 - name: DATABASE_HOST
-  value: postgres-leader  # Changed from "postgres"
+  value: postgres-leader  # Use leader service instead of regular service
 ```
 
 **Line count**: 0 lines of code (just annotation + DNS change)

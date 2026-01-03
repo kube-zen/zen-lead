@@ -2,7 +2,7 @@
 
 ## Default Build Configuration
 
-**As of 2025-01-02:** Default images are GA-only (no experimental features). Experimental features are opt-in.
+Default images are GA-only (no experimental features). Experimental features are opt-in.
 
 **Rationale:** GA-only is the safe default. Experimental features provide 15-25% performance improvement but are opt-in.
 
@@ -114,7 +114,7 @@ Both variants are built by default with `make docker-build`:
 
 ## Performance Comparison
 
-Based on integration tests:
+Integration test results:
 
 | Metric | GA-Only | With Experimental | Improvement |
 |--------|---------|-------------------|-------------|
@@ -229,7 +229,7 @@ After deploying, monitor these metrics:
 **Cause:** Image may not include experimental features
 
 **Solution:**
-1. Verify image was built with GOEXPERIMENT: `docker inspect <image>`
+1. Verify image includes experimental features: Check `GOEXPERIMENT_INFO` env var in pod
 2. Check GOEXPERIMENT_INFO env var in pod
 3. Rebuild image with experimental features
 

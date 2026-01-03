@@ -20,8 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -43,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/kube-zen/zen-lead/pkg/metrics"
+	sdkmetadata "github.com/kube-zen/zen-sdk/pkg/k8s/metadata"
 	sdklog "github.com/kube-zen/zen-sdk/pkg/logging"
 	"github.com/kube-zen/zen-sdk/pkg/observability"
 	"github.com/kube-zen/zen-sdk/pkg/retry"
@@ -100,59 +102,9 @@ const (
 	LabelEndpointSliceManagedByValue = "zen-lead"
 )
 
-// GitOps tracking labels/annotations that should NOT be copied to generated resources
-// These are common GitOps tool labels that would cause ownership/prune conflicts
-// Using map for O(1) lookup instead of O(n) slice search
-var gitOpsTrackingLabels = map[string]struct{}{
-	"app.kubernetes.io/instance":            {},
-	"app.kubernetes.io/managed-by":          {}, // We set our own value
-	"app.kubernetes.io/part-of":             {},
-	"app.kubernetes.io/version":             {},
-	"argocd.argoproj.io/instance":           {},
-	"fluxcd.io/part-of":                     {},
-	"kustomize.toolkit.fluxcd.io/name":      {},
-	"kustomize.toolkit.fluxcd.io/namespace": {},
-	"kustomize.toolkit.fluxcd.io/revision":  {},
-}
-
-var gitOpsTrackingAnnotations = map[string]struct{}{
-	"argocd.argoproj.io/sync-wave":         {},
-	"argocd.argoproj.io/sync-options":      {},
-	"fluxcd.io/sync-checksum":              {},
-	"kustomize.toolkit.fluxcd.io/checksum": {},
-}
-
-// filterGitOpsLabels removes GitOps tracking labels from a label map
-// Optimized: O(n) with map lookup instead of O(n*m) with nested loops
-func filterGitOpsLabels(labels map[string]string) map[string]string {
-	if labels == nil {
-		return make(map[string]string)
-	}
-	// Pre-allocate with estimated capacity (most labels will pass through)
-	filtered := make(map[string]string, len(labels))
-	for k, v := range labels {
-		if _, skip := gitOpsTrackingLabels[k]; !skip {
-			filtered[k] = v
-		}
-	}
-	return filtered
-}
-
-// filterGitOpsAnnotations removes GitOps tracking annotations from an annotation map
-// Optimized: O(n) with map lookup instead of O(n*m) with nested loops
-func filterGitOpsAnnotations(annotations map[string]string) map[string]string {
-	if annotations == nil {
-		return make(map[string]string)
-	}
-	// Pre-allocate with estimated capacity (most annotations will pass through)
-	filtered := make(map[string]string, len(annotations))
-	for k, v := range annotations {
-		if _, skip := gitOpsTrackingAnnotations[k]; !skip {
-			filtered[k] = v
-		}
-	}
-	return filtered
-}
+// Note: GitOps label/annotation filtering is now provided by zen-sdk/pkg/k8s/metadata
+// The functions filterGitOpsLabels and filterGitOpsAnnotations have been removed
+// and replaced with sdkmetadata.FilterGitOpsLabels and sdkmetadata.FilterGitOpsAnnotations
 
 // ServiceDirectorReconciler reconciles Services with zen-lead.io/enabled annotation
 // to route traffic to leader pods via selector-less Service + EndpointSlice.
@@ -190,6 +142,9 @@ type ServiceDirectorReconciler struct {
 
 	// enableParallelAPICalls enables parallel API calls where possible
 	enableParallelAPICalls bool
+
+	// leaderPodCacheTTL is the TTL for leader pod cache entries (stored for cleanup goroutine)
+	leaderPodCacheTTL time.Duration
 }
 
 // cachedLeaderPod holds a cached leader pod with metadata
@@ -257,13 +212,14 @@ func NewServiceDirectorReconciler(client client.Client, scheme *runtime.Scheme, 
 		metricsCollectionTimeout: metricsCollectionTimeout,
 		fastRetryConfig:          fastRetryConfig,
 		enableParallelAPICalls:   enableParallelAPICalls,
+		leaderPodCacheTTL:        leaderPodCacheTTL,
 	}
 
 	// Initialize leader pod cache only if enabled
 	if enableLeaderPodCache {
 		reconciler.leaderPodCache = make(map[string]*cachedLeaderPod)
-		// Start cache cleanup goroutine
-		go reconciler.cleanupLeaderPodCache(leaderPodCacheTTL)
+		// Cache cleanup goroutine will be started in SetupWithManager
+		// to ensure proper context lifecycle management
 	}
 
 	return reconciler
@@ -327,6 +283,32 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Update cache when Service is opted-in (annotation added or selector changed)
 	r.updateOptedInServicesCacheForService(svc, logger)
+
+	// Validate namespace (must be a valid DNS label)
+	if errs := validation.IsDNS1123Label(req.Namespace); len(errs) > 0 {
+		logger.Error(fmt.Errorf("invalid namespace: %v", errs), "Invalid namespace format",
+			sdklog.Operation("validate_namespace"),
+			sdklog.String("namespace", req.Namespace))
+		duration := time.Since(startTime).Seconds()
+		if r.Metrics != nil {
+			r.Metrics.RecordReconciliationDuration(req.Namespace, req.Name, "error", duration)
+			r.Metrics.RecordReconciliationError(req.Namespace, req.Name, "invalid_namespace")
+		}
+		return ctrl.Result{}, fmt.Errorf("invalid namespace format: %v", errs)
+	}
+
+	// Validate Service name (must be a valid DNS subdomain)
+	if errs := validation.IsDNS1123Subdomain(req.Name); len(errs) > 0 {
+		logger.Error(fmt.Errorf("invalid service name: %v", errs), "Invalid service name format",
+			sdklog.Operation("validate_service_name"),
+			sdklog.String("service", req.Name))
+		duration := time.Since(startTime).Seconds()
+		if r.Metrics != nil {
+			r.Metrics.RecordReconciliationDuration(req.Namespace, req.Name, "error", duration)
+			r.Metrics.RecordReconciliationError(req.Namespace, req.Name, "invalid_service_name")
+		}
+		return ctrl.Result{}, fmt.Errorf("invalid service name format: %v", errs)
+	}
 
 	// Validate Service has selector (required for finding pods)
 	if len(svc.Spec.Selector) == 0 {
@@ -433,7 +415,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		r.Metrics.RecordReconciliation(svc.Namespace, svc.Name, "success")
 	}
 
-	// Select leader pod (with stickiness, unless current leader was unhealthy)
+	// Select leader pod (with stickiness, unless current leader is unhealthy)
 	leaderPod := r.selectLeaderPod(ctx, svc, podList.Items, bypassStickiness, logger)
 
 	// Detect failover (leader changed) - track leader switch time
@@ -482,7 +464,7 @@ func (r *ServiceDirectorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					reason = "noIP"
 				}
 			} else if failoverReason != "" {
-				// Use the reason we determined earlier when leader was unhealthy
+				// Use the reason determined when leader is unhealthy
 				reason = failoverReason
 			}
 			r.Metrics.RecordFailover(svc.Namespace, svc.Name, reason)
@@ -697,7 +679,7 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 				}
 			}
 		}
-		// Sticky leader was not available
+		// Sticky leader is not available
 		if r.Metrics != nil {
 			r.Metrics.RecordStickyLeaderMiss(svc.Namespace, svc.Name)
 		}
@@ -743,7 +725,7 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 		return nil
 	}
 
-	// Sort by creation timestamp (oldest first), then by name (lexical) as tie-breaker
+	// Sort by creation timestamp (earliest first), then by name (lexical) as tie-breaker
 	sort.Slice(readyPods, func(i, j int) bool {
 		if !readyPods[i].CreationTimestamp.Equal(&readyPods[j].CreationTimestamp) {
 			return readyPods[i].CreationTimestamp.Before(&readyPods[j].CreationTimestamp)
@@ -756,7 +738,7 @@ func (r *ServiceDirectorReconciler) selectLeaderPod(ctx context.Context, svc *co
 		return nil
 	}
 
-	// Return oldest Ready pod
+	// Return earliest Ready pod
 	leaderPod := &readyPods[0]
 	logger.Info("Selected new leader pod", sdklog.Operation("select_leader"), sdklog.String("pod", leaderPod.Name))
 	return leaderPod
@@ -836,12 +818,12 @@ func (r *ServiceDirectorReconciler) reconcileLeaderService(ctx context.Context, 
 		}
 		// Service doesn't exist, create it
 		// Filter GitOps labels/annotations to prevent ownership conflicts
-		leaderLabels := filterGitOpsLabels(svc.Labels)
+		leaderLabels := sdkmetadata.FilterGitOpsLabels(svc.Labels)
 		leaderLabels[LabelManagedBy] = LabelManagedByValue
 		leaderLabels[LabelSourceService] = svc.Name
 
 		// Build annotations for leader Service (add leader tracking annotations)
-		leaderAnnotations := filterGitOpsAnnotations(svc.Annotations)
+		leaderAnnotations := sdkmetadata.FilterGitOpsAnnotations(svc.Annotations)
 		if leaderPod != nil {
 			leaderAnnotations["zen-lead.io/current-leader"] = leaderPod.Name
 			leaderAnnotations[AnnotationLeaderPodName] = leaderPod.Name
@@ -1106,8 +1088,9 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 	// Determine address type from pod IP
 	addressType := discoveryv1.AddressTypeIPv4
 	if leaderPod != nil && leaderPod.Status.PodIP != "" {
-		// Simple heuristic: if IP contains ":", it's IPv6
-		if strings.Contains(leaderPod.Status.PodIP, ":") {
+		// Use net.ParseIP for accurate IPv6 detection
+		ip := net.ParseIP(leaderPod.Status.PodIP)
+		if ip != nil && ip.To4() == nil {
 			addressType = discoveryv1.AddressTypeIPv6
 		}
 	}
@@ -1149,7 +1132,7 @@ func (r *ServiceDirectorReconciler) reconcileEndpointSlice(ctx context.Context, 
 		}
 		// EndpointSlice doesn't exist, create it
 		// Filter GitOps labels to prevent ownership conflicts
-		endpointSliceLabels := filterGitOpsLabels(svc.Labels)
+		endpointSliceLabels := sdkmetadata.FilterGitOpsLabels(svc.Labels)
 		endpointSliceLabels[discoveryv1.LabelServiceName] = leaderServiceName
 		endpointSliceLabels[LabelManagedBy] = LabelManagedByValue
 		endpointSliceLabels[LabelSourceService] = svc.Name
@@ -1387,14 +1370,40 @@ func (r *ServiceDirectorReconciler) getMinReadyDuration(svc *corev1.Service) tim
 }
 
 // getLeaderServiceName determines the leader service name
+// Validates that the resulting name is a valid Kubernetes resource name
 func (r *ServiceDirectorReconciler) getLeaderServiceName(svc *corev1.Service) string {
+	var leaderName string
 	if svc.Annotations != nil {
 		if customName := svc.Annotations[AnnotationLeaderServiceNameService]; customName != "" {
-			return customName
+			leaderName = customName
 		}
 	}
-	// Default: <service-name>-leader
-	return svc.Name + ServiceSuffixService
+	if leaderName == "" {
+		// Default: <service-name>-leader
+		leaderName = svc.Name + ServiceSuffixService
+	}
+	
+	// Validate resource name (RFC 1123 subdomain)
+	if errs := validation.IsDNS1123Subdomain(leaderName); len(errs) > 0 {
+		// Log warning but use sanitized name (replace invalid chars)
+		// This should rarely happen as Kubernetes validates Service names
+		// Use background context for logging (no request context available here)
+		logger := packageLogger.WithContext(context.Background())
+		logger.Warn("Invalid leader service name generated",
+			sdklog.String("service", svc.Name),
+			sdklog.String("namespace", svc.Namespace),
+			sdklog.String("generated_name", leaderName),
+			sdklog.String("errors", fmt.Sprintf("%v", errs)))
+		// Fallback: use service name with sanitized suffix
+		leaderName = svc.Name + "-leader"
+		// Re-validate fallback
+		if errs := validation.IsDNS1123Subdomain(leaderName); len(errs) > 0 {
+			// Last resort: use just the service name (may conflict but better than invalid)
+			leaderName = svc.Name
+		}
+	}
+	
+	return leaderName
 }
 
 // SetupWithManager sets up the ServiceDirectorReconciler with the manager
@@ -1455,6 +1464,12 @@ func (r *ServiceDirectorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// Don't reconcile on generic events
 			return false
 		},
+	}
+
+	// Start cache cleanup goroutine if cache is enabled
+	// Use manager's context for proper lifecycle management (respects shutdown)
+	if r.leaderPodCache != nil && r.leaderPodCacheTTL > 0 {
+		go r.cleanupLeaderPodCache(mgr.GetContext(), r.leaderPodCacheTTL)
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).

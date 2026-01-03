@@ -90,7 +90,7 @@ kubectl get pod <leader-pod> -o yaml | grep -A 5 ports
 **Symptoms:**
 - Leader pod becomes NotReady but EndpointSlice still points to it
 - Failover doesn't occur
-- Old leader pod still receives traffic
+- Previous leader pod still receives traffic
 
 **Diagnosis:**
 ```bash
@@ -110,7 +110,7 @@ kubectl get service <service> -o jsonpath='{.metadata.annotations.zen-lead\.io/s
 **Possible Causes:**
 1. Controller not reconciling (check logs)
 2. Pod readiness not transitioning properly
-3. Sticky leader enabled but old leader still appears Ready
+3. Sticky leader enabled but previous leader still appears Ready
 4. Controller pod not running
 
 **Solutions:**

@@ -10,6 +10,11 @@ spec:
   selector:
     matchLabels:
       app: zen-lead
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
@@ -19,10 +24,22 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        fsGroup: 65532
+      terminationGracePeriodSeconds: 30
       containers:
       - name: manager
         image: kubezen/zen-lead:latest
         imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
         args:
         - --metrics-bind-address=:8080
         - --health-probe-bind-address=:8081
@@ -54,6 +71,13 @@ spec:
             port: 8081
           initialDelaySeconds: 5
           periodSeconds: 10
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 12
         resources:
           limits:
             cpu: 500m

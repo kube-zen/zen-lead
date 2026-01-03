@@ -1,7 +1,5 @@
 # Zen-Lead Roadmap
 
-**Last Updated:** 2025-12-30
-
 ## Phase 1: Day-0 MVP ✅ (Complete)
 
 **Status:** ✅ Complete
@@ -9,7 +7,7 @@
 - [x] Service-annotation opt-in (`zen-lead.io/enabled: "true"`)
 - [x] Selector-less leader Service creation
 - [x] EndpointSlice management for leader routing
-- [x] Controller-driven leader selection (sticky, oldest Ready)
+- [x] Controller-driven leader selection (sticky, earliest Ready)
 - [x] Automatic failover on leader pod failure
 - [x] Fail-closed port resolution (named targetPort support)
 - [x] Prometheus metrics and Grafana dashboard
