@@ -10,8 +10,12 @@ WORKDIR /workspace
 # Copy go mod files
 COPY zen-lead/go.mod zen-lead/go.sum* ./
 
-# Download dependencies
-RUN go mod download
+# Copy zen-sdk (needed for latest HTTP client changes)
+COPY zen-sdk/ ./zen-sdk/
+
+# Download dependencies (with zen-sdk replace directive)
+RUN go mod edit -replace github.com/kube-zen/zen-sdk=./zen-sdk && \
+    go mod download
 
 # Copy source code
 COPY zen-lead/cmd/ cmd/

@@ -35,6 +35,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
+
+	sdkhttp "github.com/kube-zen/zen-sdk/pkg/http"
 )
 
 // MetricsResult holds collected metrics for comparison
@@ -86,8 +88,12 @@ func scrapeMetrics(ctx context.Context, c client.Client, namespace, podLabelSele
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	// Use hardened HTTP client for better resilience in tests
+	httpConfig := sdkhttp.DefaultClientConfig()
+	httpConfig.Timeout = 10 * time.Second
+	httpConfig.ServiceName = "zen-lead-test"
+	httpClient := sdkhttp.NewClient(httpConfig)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch metrics: %w", err)
 	}
