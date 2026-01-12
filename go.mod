@@ -3,7 +3,7 @@ module github.com/kube-zen/zen-lead
 go 1.25.0
 
 require (
-	github.com/kube-zen/zen-sdk v0.1.2-alpha.0.20260103202524-0bce5d66908f
+	github.com/kube-zen/zen-sdk v0.2.9-alpha
 	github.com/prometheus/client_golang v1.23.2
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/trace v1.39.0
