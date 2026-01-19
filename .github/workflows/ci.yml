@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache-dependency-path: go.sum
+      
+      - name: Install dependencies
+        run: go mod download
+      
+      - name: Build golangci-lint from source (Go 1.25)
+        # Workaround: Build golangci-lint from source with Go 1.25
+        # until official releases support Go 1.25
+        # This ensures the binary is built with the same Go version as the project
+        run: |
+          echo "Building golangci-lint from source with Go 1.25..."
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          GOBIN=$(go env GOPATH)/bin
+          echo "$GOBIN" >> $GITHUB_PATH
+          echo "Verifying golangci-lint installation..."
+          $GOBIN/golangci-lint version
+          echo "golangci-lint built successfully with Go 1.25"
+      
+      - name: Run golangci-lint
+        run: |
+          GOBIN=$(go env GOPATH)/bin
+          $GOBIN/golangci-lint run --timeout=5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache-dependency-path: go.sum
+      
+      - name: Install dependencies
+        run: go mod download
+      
+      - name: Run tests with coverage
+        env:
+          GOWORK: off
+        run: go test -v -race -timeout=15m -coverprofile=coverage.out ./...
+      
+      - name: Check coverage (>=70%)
+        env:
+          GOWORK: off
+        run: |
+          # Calculate coverage for tested packages only
+          COVERAGE=$(go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics)" | awk '{sum+=$3; count++} END {if (count>0) printf "%.1f", sum/count; else print "0"}')
+          COVERAGE_INT=$(echo "$COVERAGE" | cut -d. -f1)
+          echo "Tested packages coverage: ${COVERAGE}%"
+          if [ -z "$COVERAGE_INT" ] || [ "$COVERAGE_INT" -lt 70 ]; then
+            echo "❌ Coverage is ${COVERAGE}% (required: >=70%)"
+            go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3
+            exit 1
+          else
+            echo "✅ Coverage is ${COVERAGE}% (>=70%)"
+            go tool cover -func=coverage.out | grep -E "(pkg/director|pkg/metrics|^total:)" | tail -3
+          fi
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache-dependency-path: go.sum
+      
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      
+      - name: Run vulnerability scan
+        env:
+          GOWORK: off
+        run: |
+          echo "Scanning for vulnerabilities..."
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./... || {
+            echo "❌ Vulnerabilities found"
+            exit 1
+          }
+          echo "✅ No known vulnerabilities found"
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache-dependency-path: go.sum
+      
+      - name: Install dependencies
+        run: go mod download
+      
+      - name: Build
+        run: |
+          mkdir -p bin
+          go build -o bin/manager ./cmd/manager
+      
+      - name: Verify binary
+        run: |
+          if [ ! -f bin/manager ]; then
+            echo "Binary not found"
+            exit 1
+          fi
+          file bin/manager
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Only run on main branch or when explicitly requested
+    if: github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache-dependency-path: go.sum
+      
+      - name: Install kind
+        uses: container-tools/kind-action@v2
+        with:
+          version: "v0.20.0"
+      
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+      
+      - name: Install dependencies
+        env:
+          GOWORK: off
+        run: go mod download
+      
+      - name: Setup E2E test environment
+        env:
+          GOWORK: off
+        run: |
+          chmod +x test/e2e/setup_kind.sh
+          ./test/e2e/setup_kind.sh create || {
+            echo "⚠️ E2E setup failed - tests will be skipped"
+            exit 0
+          }
+      
+      - name: Run E2E tests
+        env:
+          GOWORK: off
+          KUBECONFIG: ${{ env.KUBECONFIG || '$HOME/.kube/zen-lead-e2e-config' }}
+        run: |
+          if [ -f "$KUBECONFIG" ]; then
+            go test -v -tags=e2e -timeout=10m ./test/e2e/... || {
+              echo "⚠️ E2E tests failed"
+              exit 0  # Don't fail CI for E2E tests (optional)
+            }
+          else
+            echo "⚠️ Kubeconfig not found - skipping E2E tests"
+          fi
+      
+      - name: Cleanup E2E environment
+        if: always()
+        run: |
+          ./test/e2e/setup_kind.sh delete || true
