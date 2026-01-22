@@ -18,23 +18,18 @@ package director
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-)
 
-var (
-	// ErrNotReady indicates the controller is not ready
-	ErrNotReady = errors.New("controller not ready")
-	// ErrAPIConnectionFailed indicates API server connectivity issue
-	ErrAPIConnectionFailed = errors.New("API server connection failed")
+	"github.com/kube-zen/zen-sdk/pkg/health"
 )
 
 // ControllerHealthChecker provides health check functionality for the ServiceDirector controller
+// Implements zen-sdk/pkg/health.Checker interface
 type ControllerHealthChecker struct {
 	reconciler *ServiceDirectorReconciler
 }
@@ -46,21 +41,21 @@ func NewControllerHealthChecker(reconciler *ServiceDirectorReconciler) *Controll
 	}
 }
 
-// Check verifies that the controller can reconcile Services
-// Returns nil if healthy, error if unhealthy
-func (c *ControllerHealthChecker) Check(req *http.Request) error {
-	// Basic health check: verify reconciler is initialized
+// ReadinessCheck verifies that the controller is ready to serve requests
+// Returns nil if ready, error if not ready
+func (c *ControllerHealthChecker) ReadinessCheck(req *http.Request) error {
+	// Basic readiness check: verify reconciler is initialized
 	if c.reconciler == nil {
-		return ErrNotReady
+		return fmt.Errorf("%w: reconciler not initialized", health.ErrNotInitialized)
 	}
 	if c.reconciler.Client == nil {
-		return ErrNotReady
+		return fmt.Errorf("%w: client not initialized", health.ErrNotReady)
 	}
 	if c.reconciler.Metrics == nil {
-		return ErrNotReady
+		return fmt.Errorf("%w: metrics not initialized", health.ErrNotReady)
 	}
 
-	// Enhanced health check: verify API server connectivity
+	// Enhanced readiness check: verify API server connectivity
 	// Use a short timeout to avoid blocking the health check
 	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
 	defer cancel()
@@ -68,7 +63,7 @@ func (c *ControllerHealthChecker) Check(req *http.Request) error {
 	// Test API connectivity by listing namespaces (lightweight operation)
 	nsList := &corev1.NamespaceList{}
 	if err := c.reconciler.Client.List(ctx, nsList, client.Limit(1)); err != nil {
-		return fmt.Errorf("%w: %v", ErrAPIConnectionFailed, err)
+		return fmt.Errorf("%w: API server connection failed: %v", health.ErrNotReady, err)
 	}
 
 	// Verify cache is initialized (if enabled)
@@ -76,6 +71,39 @@ func (c *ControllerHealthChecker) Check(req *http.Request) error {
 	// We don't check cache size here as it's dynamic
 	_ = c.reconciler.leaderPodCache
 
-	// Controller is healthy if reconciler is properly initialized and API is reachable
+	// Controller is ready if reconciler is properly initialized and API is reachable
 	return nil
+}
+
+// LivenessCheck verifies that the controller is actively processing
+// Returns nil if alive, error if not alive
+func (c *ControllerHealthChecker) LivenessCheck(req *http.Request) error {
+	// Liveness is similar to readiness but less strict
+	// Just verify basic initialization
+	if c.reconciler == nil {
+		return fmt.Errorf("%w: reconciler not initialized", health.ErrNotInitialized)
+	}
+	if c.reconciler.Client == nil {
+		return fmt.Errorf("%w: client not initialized", health.ErrNotReady)
+	}
+
+	// For liveness, we don't require API connectivity check
+	// The controller is alive if it's initialized, even if API is temporarily unreachable
+	return nil
+}
+
+// StartupCheck verifies that the controller is initialized
+// Returns nil if initialized, error otherwise
+func (c *ControllerHealthChecker) StartupCheck(req *http.Request) error {
+	// Startup check is the most basic - just verify reconciler exists
+	if c.reconciler == nil {
+		return fmt.Errorf("%w: reconciler not initialized", health.ErrNotInitialized)
+	}
+	return nil
+}
+
+// Check is a convenience method that calls ReadinessCheck for backward compatibility
+// Deprecated: Use ReadinessCheck, LivenessCheck, or StartupCheck directly
+func (c *ControllerHealthChecker) Check(req *http.Request) error {
+	return c.ReadinessCheck(req)
 }
